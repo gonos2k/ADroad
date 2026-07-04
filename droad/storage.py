@@ -45,7 +45,7 @@ def _phase_ledger(before, after, ice2_before, ice2_after, transfers,
     """
     unknown = set(transfers) - set(INTERNAL_TRANSFER_KEYS)
     if unknown:
-        raise LedgerError(f"unknown internal_transfer keys: {sorted(unknown)}")
+        raise LedgerError(f"unknown internal_transfer keys: {sorted(unknown, key=str)}")
     id2 = (ice2_after - ice2_before) + ice2_reset      # change excluding the reset
     return make_ledger(
         primary_before=before,

@@ -175,6 +175,32 @@ def test_storage_result_diagnostics_frozen_to_tuple():
     assert r.diagnostics == (DIAG_SNOW_OVERFLOW,)
 
 
+def test_event_flag_must_be_bool():
+    with pytest.raises(LedgerError):
+        _ledger(0.0, 0.0, 0.0, 0.0, event_flags={"freeze_event": "yes"})
+
+
+def test_primary_mass_must_be_non_negative():
+    with pytest.raises(LedgerError):                    # actual = -1 (sink 1 from 0)
+        _ledger(0.0, 0.0, 1.0, -1.0)
+
+
+def test_non_scalar_field_rejected():
+    it = _zero_transfer(); aux = _zero_aux(); ev = _no_events()
+    with pytest.raises(LedgerError):                    # array-like external_source
+        StorageLedger(
+            primary_before=0.0, external_source=[1.0], external_sink=0.0,
+            internal_transfer=it, auxiliary_update=aux,
+            primary_after_expected=0.0, primary_after_actual=0.0,
+            primary_mass_residual=0.0, event_flags=ev)
+
+
+def test_rollout_audit_rejects_missing_keys():
+    from droad.ledger import rollout_audit_to_dict
+    with pytest.raises(LedgerError):
+        rollout_audit_to_dict({"ledger": []})           # return_ledger=False shape
+
+
 def test_rollout_audit_to_dict_is_json_serializable():
     import json
     from droad.ledger import rollout_audit_to_dict, DIAG_SNOW_OVERFLOW

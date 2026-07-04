@@ -68,15 +68,31 @@ def _check_keys(d: Mapping[str, object], required: tuple[str, ...], name: str) -
     missing = set(required) - keys
     unknown = keys - set(required)
     if missing:
-        raise LedgerError(f"{name} missing keys: {sorted(missing)}")
+        raise LedgerError(f"{name} missing keys: {sorted(missing, key=str)}")
     if unknown:
-        raise LedgerError(f"{name} has unknown keys: {sorted(unknown)}")
+        raise LedgerError(f"{name} has unknown keys: {sorted(unknown, key=str)}")
+
+
+def _is_boolish(v) -> bool:
+    """True for a genuine boolean — Python bool or numpy bool_ (detected by
+    duck-typing so this backend-neutral module needn't import numpy). Rejects
+    str/int/float, so a truthy "False" string can't masquerade as a flag."""
+    if isinstance(v, bool):
+        return True
+    cls = type(v)                                    # numpy bool: name 'bool'/'bool_'
+    return (cls.__module__.split(".")[0] == "numpy"
+            and cls.__name__ in ("bool_", "bool"))
 
 
 def _require_finite(name: str, value) -> None:
     """Reject NaN/Inf — an audit record with non-finite mass is meaningless, and
-    NaN would slip past the < 0 / |.|>tol checks (all comparisons with NaN False)."""
-    if not math.isfinite(float(value)):
+    NaN would slip past the < 0 / |.|>tol checks (all comparisons with NaN False).
+    Non-scalar input (array/list/object) is also rejected as a LedgerError."""
+    try:
+        v = float(value)
+    except (TypeError, ValueError):
+        raise LedgerError(f"{name} must be a finite scalar, got {value!r}") from None
+    if not math.isfinite(v):
         raise LedgerError(f"{name} must be finite, got {value!r}")
 
 
@@ -110,6 +126,12 @@ class StorageLedger:
         for k, v in self.auxiliary_update.items():
             _require_finite(f"auxiliary_update[{k}]", v)
 
+        # event_flags must be genuine bools (merge_ledgers uses bool(...) — a
+        # string "False" would be truthy and corrupt the aggregated flag)
+        for k, v in self.event_flags.items():
+            if not _is_boolish(v):
+                raise LedgerError(f"event_flags[{k}] must be bool, got {v!r}")
+
         # non-negativity: source/sink and every transfer/aux amount are magnitudes
         if self.external_source < 0.0 or self.external_sink < 0.0:
             raise LedgerError("external_source/external_sink must be non-negative")
@@ -119,6 +141,14 @@ class StorageLedger:
         for k, v in self.auxiliary_update.items():
             if v < 0.0:
                 raise LedgerError(f"auxiliary_update[{k}] must be non-negative")
+
+        # primary mass (water+snow+ice+deposit) is a physical state — non-negative.
+        # expected may go negative for residual diagnosis, but before/actual can't.
+        if self.primary_before < -_CONSISTENCY_TOL:
+            raise LedgerError(f"primary_before must be non-negative, got {self.primary_before}")
+        if self.primary_after_actual < -_CONSISTENCY_TOL:
+            raise LedgerError(
+                f"primary_after_actual must be non-negative, got {self.primary_after_actual}")
 
         # derived-field consistency: expected & residual must match the flows, so a
         # directly-constructed ledger can't carry a forged residual (only the
@@ -133,7 +163,8 @@ class StorageLedger:
         # freeze the mappings so an audit record can't be mutated after the fact
         object.__setattr__(self, "internal_transfer", MappingProxyType(dict(self.internal_transfer)))
         object.__setattr__(self, "auxiliary_update", MappingProxyType(dict(self.auxiliary_update)))
-        object.__setattr__(self, "event_flags", MappingProxyType(dict(self.event_flags)))
+        object.__setattr__(self, "event_flags",       # store as plain Python bool
+                           MappingProxyType({k: bool(v) for k, v in self.event_flags.items()}))
 
 
 @dataclass(frozen=True)
@@ -150,7 +181,7 @@ class StorageResult:
         diagnostics = tuple(self.diagnostics)          # freeze (a list would be mutable)
         unknown = set(diagnostics) - DIAGNOSTIC_CODES
         if unknown:
-            raise LedgerError(f"unknown diagnostic codes: {sorted(unknown)}")
+            raise LedgerError(f"unknown diagnostic codes: {sorted(unknown, key=str)}")
         object.__setattr__(self, "diagnostics", diagnostics)
 
 
@@ -201,6 +232,13 @@ def storage_result_to_dict(r: StorageResult) -> dict:
 def rollout_audit_to_dict(out: Mapping) -> dict:
     """JSON/logging view of a full_rollout(return_ledger=True) audit trail:
     per-step merged ledger, (prec, cond) detail, and diagnostics."""
+    missing = {"ledger", "ledger_detail", "diagnostics"} - set(out)
+    if missing:
+        raise LedgerError(
+            f"rollout audit keys missing (need return_ledger=True): {sorted(missing, key=str)}")
+    n = len(out["ledger"])
+    if not (len(out["ledger_detail"]) == n == len(out["diagnostics"])):
+        raise LedgerError("rollout audit lists have inconsistent lengths")
     return {
         "ledger": [ledger_to_dict(lg) for lg in out["ledger"]],
         "ledger_detail": [{"prec": ledger_to_dict(p), "cond": ledger_to_dict(c)}

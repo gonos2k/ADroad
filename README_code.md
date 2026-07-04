@@ -63,6 +63,13 @@ pytest -q                     →  전부 통과 (배치 권장: pytest -m "not 
 **fixture 도메인(no-coupling rollout) 내부**에서만 보장된다. 극단 비물리 입력에서
 reference(clip 없음)와 갈라질 수 있다 — exact parity는 정상 기상 범위 주장이다.
 
+## 코드 리뷰 반영 (7차: 감사 record 방어성 마무리)
+`StorageLedger`가 `event_flags` 값이 실제 bool인지 검증(numpy bool 허용·Python bool로 정규화 —
+문자열 "False"의 truthy 오염 차단)하고, `primary_before`/`primary_after_actual`의 **비음수**를 검증
+(mass state는 음수 불가). `_require_finite`는 비스칼라 입력의 `float()` 예외를 `LedgerError`로 래핑.
+unknown key/diagnostic 오류의 `sorted`는 `key=str`로 혼합 타입 안전. `rollout_audit_to_dict`는
+누락 키·길이 불일치를 명시적으로 거부.
+
 ## 코드 리뷰 반영 (6차: finite 검증 + 불변화 마무리)
 `StorageLedger.__post_init__`가 모든 numeric scalar(primary/external/transfer/aux)에 **finite 검증**
 (`math.isfinite`)을 추가 — NaN/Inf는 `<0`·`|·|>tol` 비교를 통과하므로 감사 레이어에서 명시적으로 거부.
