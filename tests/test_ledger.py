@@ -280,6 +280,41 @@ def test_rollout_audit_validates_diagnostic_codes():
                                "diagnostics": [("not_a_real_code",)]})
 
 
+# --- defensive wrapping: bad public input -> LedgerError, not raw exception ---
+
+def test_diagnostics_none_and_non_iterable_rejected():
+    from droad.ledger import StorageResult
+    lg = _ledger(1.0, 0.0, 0.0, 1.0)
+    with pytest.raises(LedgerError):
+        StorageResult(object(), lg, None)              # None
+    with pytest.raises(LedgerError):
+        StorageResult(object(), lg, 123)               # non-iterable, non-str
+
+
+def test_check_keys_non_mapping_rejected():
+    it = _zero_transfer(); aux = _zero_aux(); ev = _no_events()
+    with pytest.raises(LedgerError):                    # internal_transfer not a mapping
+        StorageLedger(
+            primary_before=0.0, external_source=0.0, external_sink=0.0,
+            internal_transfer=None, auxiliary_update=aux,
+            primary_after_expected=0.0, primary_after_actual=0.0,
+            primary_mass_residual=0.0, event_flags=ev)
+
+
+def test_rollout_audit_non_mapping_rejected():
+    from droad.ledger import rollout_audit_to_dict
+    with pytest.raises(LedgerError):
+        rollout_audit_to_dict(None)
+    with pytest.raises(LedgerError):
+        rollout_audit_to_dict([1, 2, 3])
+
+
+def test_merge_rejects_non_ledger_child():
+    a = _ledger(0.0, 0.0, 0.0, 0.0)
+    with pytest.raises(LedgerError):
+        merge_ledgers(a, object())
+
+
 def test_rollout_audit_to_dict_is_json_serializable():
     import json
     from droad.ledger import rollout_audit_to_dict, DIAG_SNOW_OVERFLOW

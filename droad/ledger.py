@@ -28,6 +28,7 @@ whether such reference behavior is *physically* desirable is a separate concern
 from __future__ import annotations
 
 import math
+from collections.abc import Mapping as ABCMapping
 from dataclasses import dataclass
 from types import MappingProxyType
 from typing import Mapping
@@ -69,7 +70,12 @@ def _normalize_diagnostics(diagnostics) -> tuple:
     """Normalize & validate a diagnostics collection (shared by StorageResult and
     rollout_audit_to_dict): a bare string becomes a 1-tuple, every code must be a
     registered string. Returns a tuple; raises LedgerError on anything invalid."""
-    d = (diagnostics,) if isinstance(diagnostics, str) else tuple(diagnostics)
+    if diagnostics is None:
+        raise LedgerError("diagnostics must be an iterable of codes (or a str), not None")
+    try:
+        d = (diagnostics,) if isinstance(diagnostics, str) else tuple(diagnostics)
+    except TypeError:
+        raise LedgerError(f"diagnostics must be iterable or str, got {diagnostics!r}") from None
     for code in d:
         if not isinstance(code, str):
             raise LedgerError(f"diagnostic code must be str, got {code!r}")
@@ -80,6 +86,8 @@ def _normalize_diagnostics(diagnostics) -> tuple:
 
 
 def _check_keys(d: Mapping[str, object], required: tuple[str, ...], name: str) -> None:
+    if not isinstance(d, ABCMapping):
+        raise LedgerError(f"{name} must be a mapping, got {type(d).__name__}")
     keys = set(d)
     missing = set(required) - keys
     unknown = keys - set(required)
@@ -260,6 +268,8 @@ def storage_result_to_dict(r: StorageResult) -> dict:
 def rollout_audit_to_dict(out: Mapping) -> dict:
     """JSON/logging view of a full_rollout(return_ledger=True) audit trail:
     per-step merged ledger, (prec, cond) detail, and diagnostics."""
+    if not isinstance(out, ABCMapping):
+        raise LedgerError("rollout audit must be a mapping from full_rollout(return_ledger=True)")
     missing = {"ledger", "ledger_detail", "diagnostics"} - set(out)
     if missing:
         raise LedgerError(
@@ -311,6 +321,8 @@ def merge_ledgers(*ledgers: StorageLedger, atol: float = 1e-9) -> StorageLedger:
     if atol < 0.0:
         raise LedgerError("merge_ledgers.atol must be non-negative")
     for i, lg in enumerate(ledgers):
+        if not isinstance(lg, StorageLedger):
+            raise LedgerError(f"merge_ledgers child {i} must be StorageLedger, got {type(lg).__name__}")
         if abs(lg.primary_mass_residual) > atol:
             raise LedgerError(
                 f"child ledger {i} has non-zero residual: {lg.primary_mass_residual}")
