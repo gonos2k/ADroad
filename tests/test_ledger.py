@@ -91,3 +91,51 @@ def test_merge_event_flags_or():
     assert merged.event_flags["freeze_event"] is True
     assert merged.event_flags["melt_event"] is True
     assert merged.event_flags["snow_event"] is False
+
+
+# --- adversarial regression (3rd review) ---
+
+def test_merge_rejects_non_contiguous_children():
+    a = _ledger(0.0, 2.0, 0.0, 2.0)          # ends at 2.0
+    b = _ledger(5.0, 0.0, 0.0, 5.0)          # but next starts at 5.0 -> gap
+    with pytest.raises(LedgerError):
+        merge_ledgers(a, b)
+
+
+def test_ledger_mappings_are_immutable():
+    lg = _ledger(1.0, 2.0, 0.0, 3.0, internal_transfer={"water_to_ice": 1.0})
+    with pytest.raises(TypeError):
+        lg.internal_transfer["water_to_ice"] = 999.0
+    with pytest.raises(TypeError):
+        lg.event_flags["freeze_event"] = True
+
+
+def test_directly_forged_residual_rejected():
+    from droad.ledger import StorageLedger
+    it = _zero_transfer(); aux = _zero_aux(); ev = _no_events()
+    with pytest.raises(LedgerError):        # actual=5 but residual lied as 0
+        StorageLedger(
+            primary_before=0.0, external_source=2.0, external_sink=0.0,
+            internal_transfer=it, auxiliary_update=aux,
+            primary_after_expected=2.0, primary_after_actual=5.0,
+            primary_mass_residual=0.0,     # true residual is 5-2=3, not 0
+            event_flags=ev)
+
+
+def test_negative_flow_rejected():
+    with pytest.raises(LedgerError):
+        _ledger(0.0, -1.0, 0.0, -1.0)      # negative external_source
+
+
+def test_ledger_to_dict_is_json_serializable():
+    import json
+    from droad.ledger import ledger_to_dict
+    lg = _ledger(1.0, 2.0, 0.0, 3.0, internal_transfer={"water_to_ice": 1.0},
+                 event_flags={"freeze_event": True})
+    d = ledger_to_dict(lg)
+    assert d["primary_after_actual"] == 3.0
+    assert d["internal_transfer"]["water_to_ice"] == 1.0
+    assert d["event_flags"]["freeze_event"] is True
+    json.dumps(d)                          # must not raise (plain dicts, not proxies)
+    d["internal_transfer"]["water_to_ice"] = 999.0   # mutating the copy is fine
+    assert lg.internal_transfer["water_to_ice"] == 1.0   # original untouched

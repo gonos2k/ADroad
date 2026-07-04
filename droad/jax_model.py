@@ -32,7 +32,9 @@ def _safe_den(x, eps=1e-6):
 
 
 def _blc_v0(Tsurf, Tair, VZ, Rhz, BLCond0, SrfWat, dt, p, n_iter=40):
-    TaK = Tair + 273.15
+    # Kelvin temperature floored away from 0 so an unconstrained-DA / stress-test
+    # excursion toward Tair ~ -273.15 can't divide-by-zero in AirDens / stability.
+    TaK = jnp.maximum(Tair + 273.15, 1.0)
     AirDens = 100000.0 / (287.05 * TaK)
     AirHCap = 1005.0 + ((TaK - 250.0) ** 2) / 3364.0
     AirVCap = AirHCap * AirDens
@@ -43,7 +45,7 @@ def _blc_v0(Tsurf, Tair, VZ, Rhz, BLCond0, SrfWat, dt, p, n_iter=40):
         UStar = p["VK"] * VZ / (p["logUstar"] + PSIM)
         BLCond = AirVCap * p["VK"] * UStar / (p["logCond"] + PSIH)
         Stab = (-p["VK"] * p["ZRefT"] * p["Grav"] * BLCond * (Tsurf - Tair)
-                / (AirVCap * (Tair + 273.15) * (UStar ** 3)))
+                / (AirVCap * TaK * (UStar ** 3)))
         Stab = jnp.minimum(Stab, 1.0)
         # unstable branch guarded so its NaN never reaches the gradient
         arg = (1.0 + jnp.sqrt(jnp.maximum(1.0 - 16.0 * Stab, _EPS))) / 2.0

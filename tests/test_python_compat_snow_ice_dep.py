@@ -188,6 +188,61 @@ def test_snow_wear_books_snow_to_ice():
     assert r.ledger.event_flags["freeze_event"] is False
 
 
+# --- adversarial regression (3rd review): residual is a real leak detector ---
+
+def _all_residuals_zero(*results):
+    return all(abs(r.ledger.primary_mass_residual) < 1e-9 for r in results)
+
+
+def test_external_accounting_makes_residual_zero_for_correct_code():
+    """Correct storage steps (wear/clamp/condensation booked as external) leave a
+    ~0 residual — so a NON-zero residual would signal an unaccounted leak."""
+    from droad.storage import Surf, snow_storage, ice_storage, deposit_storage
+    cp = _cp_synthetic()
+    cases = [
+        Surf(SrfSnow=5.0, TsurfAve=-3.0, WearSurf=True),          # snow wear + clamp
+        Surf(SrfSnow=300.0, TsurfAve=-5.0, WearSurf=False),       # snow overflow export
+        Surf(SrfWat=2.0, TsurfAve=-2.0, WearSurf=True),           # ice freeze
+        Surf(SrfIce=1.0, SrfIce2=1.0, TsurfAve=1.0, Q2Melt=5e3),  # ice melt + wear
+        Surf(SrfDep=0.5, EvapmmTS=-0.1, TsurfAve=-1.0, WearSurf=True),  # deposit condensation+wear
+        Surf(SrfDep=5.0, TsurfAve=-1.0, WearSurf=False),          # deposit overflow -> water
+    ]
+    for s in cases:
+        assert _all_residuals_zero(
+            snow_storage(s, _wearF(), 1.0, DT, cp),
+            ice_storage(s, _wearF(), DT, cp),
+            deposit_storage(s, _wearF().DepWear, cp))
+
+
+def test_phase_ledger_rejects_transfer_typo():
+    """A mistyped transfer key must raise, not be silently dropped."""
+    from droad.ledger import LedgerError
+    from droad.storage import _phase_ledger
+    with pytest.raises(LedgerError):
+        _phase_ledger(0.0, 0.0, 0.0, 0.0, {"snow_to_icee": 1.0}, 0.0, 0.0, 0.0,
+                      {"freeze_event": False, "melt_event": False,
+                       "snow_event": False, "deposit_melt_event": False})
+
+
+def test_phase_ledger_surfaces_unaccounted_leak():
+    """If a step changes mass without booking it as transfer/external, the residual
+    is non-zero (the whole point of branch-local accounting)."""
+    from droad.storage import _phase_ledger
+    # before=2, after=1.5, but nothing booked as external sink -> 0.5 unexplained
+    lg = _phase_ledger(2.0, 1.5, 0.0, 0.0, {}, 0.0, 0.0, 0.0,
+                       {"freeze_event": False, "melt_event": False,
+                        "snow_event": False, "deposit_melt_event": False})
+    assert lg.primary_mass_residual == pytest.approx(-0.5)
+
+
+def test_ice2_reset_recorded_on_force_melt():
+    """forceIceMelting zeroes ice2 -> recorded as ice2_reset, not just decrease."""
+    from droad.storage import Surf, ice_storage
+    cp = {**_cp_synthetic(), "forceIceMelting": True}
+    r = ice_storage(Surf(SrfIce=1.0, SrfIce2=0.8, SrfSnow=0.0, TsurfAve=1.0), _wearF(), DT, cp)
+    assert r.ledger.auxiliary_update["ice2_reset"] == pytest.approx(0.8)
+
+
 def test_road_cond_aggregates_ledger():
     """R2: road_cond returns a StorageResult whose ledger merges the sub-steps."""
     from droad.ledger import StorageResult

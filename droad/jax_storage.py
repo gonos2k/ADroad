@@ -6,10 +6,13 @@ Extends the dry JAX model with a differentiable storage path:
   smooth albedo (dry<->snow). Non-negativity/overflow use jnp.clip (subgrad OK);
   phase gates use smoothing.gate so gradients flow across thresholds.
 
-This is a smooth_compat MVP (not bit-exact to the hard model). It reduces to the
-dry rollout when there is no precipitation / phase activity, and stays
-differentiable through the wet/phase-change regime (deviation-budget territory,
-not python_compat bit parity).
+This is a smooth_compat MVP (not bit-exact to the hard model). Precisely: it uses
+smooth phase gates and precipitation ramps, but keeps HARD non-negativity /
+capacity projections (jnp.clip) on the water/ice/snow stores to preserve the
+dry-reduction and non-negative-mass invariants. So it is differentiable almost
+everywhere with a subgradient at the storage bounds — not "smooth everywhere".
+It reduces to the dry rollout when there is no precipitation / phase activity
+(deviation-budget territory, not python_compat bit parity).
 """
 
 from __future__ import annotations

@@ -14,7 +14,9 @@ from __future__ import annotations
 from dataclasses import dataclass, replace
 
 from .branches import guarded_exp
-from .ledger import INTERNAL_TRANSFER_KEYS, StorageResult, make_ledger
+from .ledger import (
+    INTERNAL_TRANSFER_KEYS, LedgerError, StorageResult, make_ledger,
+)
 
 _SNOW_DRY = 1
 
@@ -24,24 +26,31 @@ def _primary(wat, snow, ice, dep):
     return wat + snow + ice + dep
 
 
-def _phase_ledger(before, after, ice2_before, ice2_after, transfers, events):
-    """Ledger for a phase-change step.
+def _phase_ledger(before, after, ice2_before, ice2_after, transfers,
+                  external_source, external_sink, ice2_reset, events):
+    """Ledger for a phase-change step — a real audit record, not a tautology.
 
-    `transfers` are the mass amounts actually moved between primary stores at
-    each branch (accumulated at the branch, NOT inferred afterward). Internal
-    transfers conserve primary mass, so the residual net primary change — traffic
-    wear loss and Min/Max clamp export — is the external flow (delta-as-external,
-    consistent with water_storage, P0 §3). ice2 is auxiliary."""
-    delta = after - before
-    id2 = ice2_after - ice2_before
+    Both the internal `transfers` (mass moved between primary stores) AND the
+    `external_source`/`external_sink` (condensation in, traffic-wear + clamp mass
+    out) are accumulated AT their branches, not inferred from the net delta. The
+    residual is therefore `actual - (before + source - sink)`: it is ~0 for
+    correct code but becomes NON-zero if a branch changes mass without recording
+    it (e.g. melting more snow than exists), so unaccounted leaks are detectable.
+    ice2 is auxiliary; `ice2_reset` records an explicit zeroing separately from
+    the ordinary increase/decrease.
+    """
+    unknown = set(transfers) - set(INTERNAL_TRANSFER_KEYS)
+    if unknown:
+        raise LedgerError(f"unknown internal_transfer keys: {sorted(unknown)}")
+    id2 = (ice2_after - ice2_before) + ice2_reset      # change excluding the reset
     return make_ledger(
         primary_before=before,
-        external_source=max(delta, 0.0),
-        external_sink=max(-delta, 0.0),
+        external_source=external_source,
+        external_sink=external_sink,
         primary_after_actual=after,
         internal_transfer={k: transfers.get(k, 0.0) for k in INTERNAL_TRANSFER_KEYS},
         auxiliary_update={"ice2_increase": max(id2, 0.0),
-                          "ice2_decrease": max(-id2, 0.0), "ice2_reset": 0.0},
+                          "ice2_decrease": max(-id2, 0.0), "ice2_reset": ice2_reset},
         event_flags=events,
     )
 
@@ -199,7 +208,8 @@ def snow_storage(s: Surf, wearF, MaxPormms, DTSecs, cp) -> StorageResult:
     snowtype, wetfrozen = s.SnowType, s.WetSnowFrozen
     before = _primary(wat, snow, ice, dep)
     ice2_in = ice2
-    tr = {}                                       # transfer amounts accumulated at branches
+    tr = {}                                       # internal transfer amounts (per branch)
+    ext_src = ext_sink = 0.0                       # external in/out (per branch)
     freeze_event = melt_event = False
 
     ext = max(wat - MaxPormms, 0.0)
@@ -232,9 +242,10 @@ def snow_storage(s: Surf, wearF, MaxPormms, DTSecs, cp) -> StorageResult:
             snow -= amt
             wat += amt
 
-    if s.WearSurf and snow > 0.0:       # wear: snow -> ice (conserved part), rest = wear loss
+    if s.WearSurf and snow > 0.0:       # wear: snow -> ice (conserved) + wear loss (external)
         gain = cp["Snow2IceFac"] * wearF.SnowTran
         tr["snow_to_ice"] = tr.get("snow_to_ice", 0.0) + gain
+        ext_sink += wearF.SnowTran - gain           # snow removed beyond what ice gained
         snow -= wearF.SnowTran
         ice += gain
         ice2 += gain
@@ -258,14 +269,20 @@ def snow_storage(s: Surf, wearF, MaxPormms, DTSecs, cp) -> StorageResult:
             snow = 0.0
             wat = 0.0
 
+    old = snow                           # Min/Max clamp (export or, if negative, import)
     if snow < cp["MinSnowmms"]:
         snow = 0.0
     if snow > cp["MaxSnowmms"]:
         snow -= cp["MaxSnowmms"] / 2.0
+    if snow < old:
+        ext_sink += old - snow
+    elif snow > old:
+        ext_src += snow - old
 
     s_next = replace(s, SrfWat=wat, SrfSnow=snow, SrfIce=ice, SrfIce2=ice2, SrfDep=dep,
                      SnowType=snowtype, WetSnowFrozen=wetfrozen, SnowIceRat=snowicerat)
     ledger = _phase_ledger(before, _primary(wat, snow, ice, dep), ice2_in, ice2, tr,
+                           ext_src, ext_sink, 0.0,
                            {"freeze_event": freeze_event, "melt_event": melt_event,
                             "snow_event": False, "deposit_melt_event": False})
     return StorageResult(s_next, ledger)
@@ -277,9 +294,10 @@ def ice_storage(s: Surf, wearF, DTSecs, cp) -> StorageResult:
     before = _primary(wat, snow, ice, s.SrfDep)
     ice2_in = ice2
     tr = {}
+    ext_src = ext_sink = ice2_reset = 0.0
     freeze_event = melt_event = False
 
-    if s.TsurfAve < cp["TLimFreeze"] and wat > 0.0:     # freezing
+    if s.TsurfAve < cp["TLimFreeze"] and wat > 0.0:     # freezing (water -> ice)
         tr["water_to_ice"] = tr.get("water_to_ice", 0.0) + wat
         freeze_event = True
         ice += wat
@@ -292,6 +310,7 @@ def ice_storage(s: Surf, wearF, DTSecs, cp) -> StorageResult:
             melt_event = True
             wat += ice
             ice = 0.0
+            ice2_reset += ice2                          # explicit ice2 zeroing
             ice2 = 0.0
         elif s.Q2Melt > 0.0 and s.TsurfAve >= cp["TLimMeltIce"]:
             amt = 1000.0 * (s.Q2Melt * DTSecs) / (cp["WatMHeat"] * cp["WatDens"])
@@ -301,15 +320,19 @@ def ice_storage(s: Surf, wearF, DTSecs, cp) -> StorageResult:
             ice2 -= amt
             wat += amt
 
-    if s.WearSurf and ice > 0.0:
-        ice -= wearF.IceWear
-    if s.WearSurf and ice2 > 0.0:
+    if s.WearSurf and ice > 0.0:                         # ice wear -> external loss
+        old = ice; ice -= wearF.IceWear; ext_sink += old - ice
+    if s.WearSurf and ice2 > 0.0:                        # ice2 is auxiliary (no primary flow)
         ice2 -= wearF.IceWear2
 
+    old = ice                                            # ice Min/Max clamp (export or import)
     if ice < cp["MinIcemms"]:
         ice = 0.0
     if ice > cp["MaxIcemms"]:
         ice = cp["MaxIcemms"]
+    if ice != old:
+        ext_sink += old - ice if ice < old else 0.0
+        ext_src += ice - old if ice > old else 0.0
     if ice2 < cp["MinIcemms"]:
         ice2 = 0.0
     if ice2 > cp["MaxIcemms"]:
@@ -317,6 +340,7 @@ def ice_storage(s: Surf, wearF, DTSecs, cp) -> StorageResult:
 
     s_next = replace(s, SrfWat=wat, SrfIce=ice, SrfIce2=ice2)
     ledger = _phase_ledger(before, _primary(wat, snow, ice, s.SrfDep), ice2_in, ice2, tr,
+                           ext_src, ext_sink, ice2_reset,
                            {"freeze_event": freeze_event, "melt_event": melt_event,
                             "snow_event": False, "deposit_melt_event": False})
     return StorageResult(s_next, ledger)
@@ -327,19 +351,26 @@ def deposit_storage(s: Surf, DepWear, cp) -> StorageResult:
     wat, snow, dep = s.SrfWat, s.SrfSnow, s.SrfDep
     before = _primary(wat, snow, s.SrfIce, dep)
     tr = {}
+    ext_src = ext_sink = 0.0
     deposit_melt_event = False
 
-    if s.EvapmmTS < 0.0:                 # condensation only (external source)
+    if s.EvapmmTS < 0.0:                 # condensation -> deposit (external source)
+        ext_src += -s.EvapmmTS
         dep -= s.EvapmmTS
-    if s.TsurfAve > cp["TLimMeltDep"]:   # melting -> water
+    if s.TsurfAve > cp["TLimMeltDep"]:   # melting -> water (internal)
         tr["deposit_to_water"] = tr.get("deposit_to_water", 0.0) + dep
         deposit_melt_event = True
         wat += dep
         dep = 0.0
-    if s.WearSurf and snow <= 0.0 and dep > 0.0:
-        dep -= DepWear
+    if s.WearSurf and snow <= 0.0 and dep > 0.0:   # wear -> external loss
+        old = dep; dep -= DepWear; ext_sink += old - dep
+    old = dep                            # min-clamp (export or, if negative, import)
     if dep < cp["MinDepmms"]:
         dep = 0.0
+    if dep < old:
+        ext_sink += old - dep
+    elif dep > old:
+        ext_src += dep - old
     if dep > cp["MaxDepmms"]:            # overflow -> water (internal transfer)
         tr["deposit_to_water"] = tr.get("deposit_to_water", 0.0) + (dep - cp["MaxDepmms"])
         wat += dep - cp["MaxDepmms"]
@@ -347,6 +378,7 @@ def deposit_storage(s: Surf, DepWear, cp) -> StorageResult:
 
     s_next = replace(s, SrfWat=wat, SrfDep=dep)
     ledger = _phase_ledger(before, _primary(wat, snow, s.SrfIce, dep), s.SrfIce2, s.SrfIce2, tr,
+                           ext_src, ext_sink, 0.0,
                            {"freeze_event": False, "melt_event": False, "snow_event": False,
                             "deposit_melt_event": deposit_melt_event})
     return StorageResult(s_next, ledger)

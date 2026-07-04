@@ -63,6 +63,16 @@ pytest -q                     →  전부 통과 (배치 권장: pytest -m "not 
 **fixture 도메인(no-coupling rollout) 내부**에서만 보장된다. 극단 비물리 입력에서
 reference(clip 없음)와 갈라질 수 있다 — exact parity는 정상 기상 범위 주장이다.
 
+## 코드 리뷰 반영 (3차: ledger 감사화)
+`_phase_ledger`가 external source/sink를 net delta로 후처리하지 않고 **branch 지점에서
+직접 누적** — residual이 이제 "설명 안 된 mass leak" 탐지기(정상=0, 누락 시 ≠0). transfer
+typo는 `LedgerError`로 거부, `StorageLedger`는 불변(MappingProxy)+expected/residual
+일관성·비음수 검증, `merge_ledgers`는 child 연속성 검증. `ice2_reset` 실제 사용(forceIceMelting).
+`step_full`에 `step_ledger=merge_ledgers(prec, cond)`. `laplace_cov` 고유값 shift로 실제 SPD 보장.
+`_blc_v0` Kelvin denominator 가드. 계약 문구 정정(StorageResult/tuple 구분, smooth_compat는
+smooth gate+hard projection, `__all__` 정리). adversarial 회귀 테스트(누출 탐지·typo·불변·연속성·
+enth_dT=0·PLim 역전) 추가. **114 passed**.
+
 ## 코드 리뷰 반영 (총평 하드닝)
 `pyproject`에 `jax`/`dev` extras(jax[cpu]·optax)와 pytest 마커(`jax`,`realdata`) 추가 —
 `pytest -m "not jax"`로 순수 NumPy 코어만 실행 가능. `smoothing.gate` τ 하한·인자 클립·`jax.nn.sigmoid`,

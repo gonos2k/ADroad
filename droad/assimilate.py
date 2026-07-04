@@ -36,11 +36,21 @@ def newton(loss_fn, x0, steps=6, damping=1e-10):
 
 
 def laplace_cov(loss_fn, x_opt, damping=1e-10):
-    """Laplace posterior covariance ~ inv(Hessian) at optimum (§7.6).
-    Hessian symmetrized + jitter-damped so the inverse stays SPD/stable."""
+    """REGULARIZED Laplace posterior covariance ~ inv(Hessian) at optimum (§7.6).
+
+    The Hessian is symmetrized, then shifted by enough to make it positive
+    definite: shift = max(damping, damping - min_eigenvalue). At a true optimum
+    the Hessian is already PSD and the shift is just `damping`; if it is
+    indefinite (saddle / not converged) the eigenvalue floor still yields an SPD
+    matrix to invert. Note this clips negative curvature — the result is a
+    regularized covariance, not the raw inverse Hessian, so at a non-optimum it
+    should be read as a stabilized approximation, not an exact posterior."""
     H = _sym(jax.hessian(loss_fn)(x_opt))
     eye = jnp.eye(H.shape[0])
-    return jnp.linalg.inv(H + damping * eye)
+    min_eval = jnp.min(jnp.linalg.eigvalsh(H))
+    # shift = max(damping, damping - min_eval); via relu to avoid a raw jnp.maximum
+    shift = damping + jax.nn.relu(-min_eval)
+    return jnp.linalg.inv(H + shift * eye)
 
 
 def hutchinson_diag(loss_fn, x, n_samples=200, seed=0):
@@ -89,6 +99,11 @@ def fit(loss_fn, init, steps=300, lr=0.05, optimizer=None):
     observed loss (not simply the last), so a late divergent step can't undo a
     good solution. history is the list of scalar losses (loss at each iterate,
     measured before that step's update).
+
+    Note: the final updated iterate is also evaluated as a best-candidate, but its
+    loss is NOT appended to `history` — so if best_control is that final iterate,
+    `min(history)` may be slightly above the returned iterate's loss. Use history
+    for the optimization curve, not as the loss of best_control.
     """
     opt = optimizer if optimizer is not None else optax.adam(lr)
     control = init

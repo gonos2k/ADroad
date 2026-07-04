@@ -11,6 +11,7 @@ from dataclasses import replace
 from .boundary import calc_blc_and_le
 from .radiation import calc_rnet
 from .thermal import calc_hcap_hcond, calc_cap_cond, calc_profile, calc_hstor
+from .ledger import merge_ledgers
 from .storage import (
     calc_prec_type, precipitation_to_storage, wear_factors, melting, calc_albedo,
 )
@@ -90,6 +91,10 @@ def step_full(*, Tmp, TmpNw, WCont, CC, ZDpth, DyK, DyC, surf, Albedo, BLCond,
     Albedo = calc_albedo(surf.WearSurf, surf.SrfSnow, surf.SrfIce, surf.SrfIce2,
                          surf.SrfDep, Albedo, cp)
 
+    # single full-step mass audit: precipitation input + condition sequence
+    step_ledger = merge_ledgers(prec_ledger, rc.ledger)
+
     return {"TmpNw": Tmp_final, "TsurfAve": surf.TsurfAve, "BLCond": BLCond,
             "Albedo": Albedo, "surf": surf,
-            "prec_ledger": prec_ledger, "cond_ledger": rc.ledger}
+            "prec_ledger": prec_ledger, "cond_ledger": rc.ledger,
+            "step_ledger": step_ledger}

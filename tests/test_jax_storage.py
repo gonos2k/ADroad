@@ -130,3 +130,24 @@ def test_enhanced_enthalpy_mode(env=None):
     obs = js.rollout({**prm, "enth_L": 1.0e8}, x0, forc, static)
     g = jax.grad(lambda L: js.loss({**prm, "enth_L": L}, x0, forc, obs, w, static))(2.0e8)
     assert np.isfinite(float(g))                                     # differentiable
+
+
+# --- adversarial regression (3rd review): guards stay finite in bad regimes ---
+
+def test_enth_dT_zero_stays_finite():
+    """enth_dT -> 0 must not blow up the latent term (safe_tau floor)."""
+    prm, static, forc, x0, n = _env(200, synthetic=True)
+    ts = js.rollout({**prm, "enth_L": 3.0e8, "enth_dT": 0.0}, x0, forc, static)
+    assert bool(jnp.all(jnp.isfinite(ts)))
+    g = jax.grad(lambda dT: jnp.sum(
+        js.rollout({**prm, "enth_L": 3.0e8, "enth_dT": dT}, x0, forc, static)))(0.0)
+    assert np.isfinite(float(g))
+
+
+def test_inverted_precip_limits_stay_finite():
+    """PLimRain <= PLimSnow must not NaN the rain/snow split (denominator floor)."""
+    prm, static, forc, x0, n = _env(200, synthetic=True)
+    ts = js.rollout({**prm, "PLimSnow": 0.8, "PLimRain": 0.2}, x0, forc, static)  # inverted
+    assert bool(jnp.all(jnp.isfinite(ts)))
+    ts_eq = js.rollout({**prm, "PLimSnow": 0.5, "PLimRain": 0.5}, x0, forc, static)  # equal
+    assert bool(jnp.all(jnp.isfinite(ts_eq)))
