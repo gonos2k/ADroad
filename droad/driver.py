@@ -53,15 +53,19 @@ def dry_rollout(*, Tair, VZ, Rhz, SW, LW, TSurfObs, hours,
 def full_rollout(*, Tair, VZ, Rhz, SW, LW, TSurfObs, hours, prec_phase, prec_in_tstep,
                  Tmp0, TmpNw0, WCont, CC, ZDpth, DyK, DyC, surf0: Surf, Albedo0, BLCond0,
                  NLayers, DTSecs, MaxPormms, Tph, InitLenI, phy, day, cp, n_steps,
-                 inCouplingPhase=False, TsurfObsLast=-9999.0):
+                 inCouplingPhase=False, TsurfObsLast=-9999.0, return_ledger=False):
     """Free-running full model (dry + storage/phase-change). Returns a dict of
-    per-step trajectories (Tsurf + 5 storages)."""
+    per-step trajectories (Tsurf + 5 storages). With return_ledger=True the dict
+    also carries out["ledger"] = list of (prec_ledger, cond_ledger) per step, so
+    mass accounting / phase-transfer diagnostics can be inspected post-hoc."""
     Tmp = np.array(Tmp0, float).copy()
     TmpNw = np.array(TmpNw0, float).copy()
     surf, Albedo, BLCond = surf0, Albedo0, BLCond0
 
     out = {k: np.empty(n_steps) for k in
            ("Tsurf", "Snow", "Water", "Ice", "Ice2", "Dep")}
+    if return_ledger:
+        out["ledger"] = []
 
     for i in range(n_steps):
         Tmp[0] = Tair[i]                                   # SetCurrentValues
@@ -90,6 +94,8 @@ def full_rollout(*, Tair, VZ, Rhz, SW, LW, TSurfObs, hours, prec_phase, prec_in_
         out["Ice"][i] = surf.SrfIce
         out["Ice2"][i] = surf.SrfIce2
         out["Dep"][i] = surf.SrfDep
+        if return_ledger:
+            out["ledger"].append((r["prec_ledger"], r["cond_ledger"]))
 
     return out
 

@@ -16,7 +16,8 @@ from typing import Mapping
 Number = float  # backend-neutral scalar for M1 (NumPy/plain float)
 
 INTERNAL_TRANSFER_KEYS = (
-    "water_to_ice", "ice_to_water", "snow_to_water", "snow_to_ice", "deposit_to_water",
+    "water_to_ice", "ice_to_water", "snow_to_water", "snow_to_ice",
+    "deposit_to_water", "deposit_to_ice",
 )
 AUXILIARY_UPDATE_KEYS = ("ice2_increase", "ice2_decrease", "ice2_reset")
 EVENT_FLAG_KEYS = ("freeze_event", "melt_event", "snow_event", "deposit_melt_event")

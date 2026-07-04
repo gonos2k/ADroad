@@ -22,8 +22,13 @@ _TAU_MIN = 1e-6      # floor on gate/clamp widths (tau may be a DA control)
 _Z_CLIP = 60.0       # bound the sigmoid/softplus argument (avoid exp overflow)
 
 
-def _safe_tau(tau):
+def safe_tau(tau):
+    """Floor a smoothing width so 1/tau denominators can't blow up (tau may be a
+    DA control that wanders to 0 or negative)."""
     return jnp.maximum(tau, _TAU_MIN)
+
+
+_safe_tau = safe_tau  # internal alias
 
 
 def gate(x, thr, tau):
@@ -68,7 +73,10 @@ def melt_fraction(T, Tmelt, dT):
 def ceff(T, c, Lfus, Tmelt, dT):
     """Effective heat capacity: base c plus latent heat spread over width dT
     around Tmelt (apparent-heat-capacity method). Integral over T recovers
-    c*T + Lfus*melt_fraction, so latent heat is energy-conserving."""
+    c*T + Lfus*melt_fraction, so latent heat is energy-conserving. dT is floored
+    so the latent term can't explode/flip sign as dT -> 0 (gate already floors it,
+    but the 1/dT factor here needs the same guard)."""
+    dT = safe_tau(dT)
     s = gate(T, Tmelt, dT)
     dphi = s * (1.0 - s) / dT          # d(melt_fraction)/dT
     return c + Lfus * dphi

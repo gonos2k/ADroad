@@ -110,4 +110,9 @@ def fit(loss_fn, init, steps=300, lr=0.05, optimizer=None):
         history.append(loss)
         if loss < best_loss:
             best_loss, best_control = loss, prev
+    # also consider the final updated iterate (its loss was never measured in the
+    # loop), so a last improving step isn't discarded — matters for small `steps`.
+    final_loss = float(loss_fn(control))
+    if final_loss < best_loss:
+        best_control = control
     return best_control, history

@@ -1,10 +1,16 @@
-"""AST audit: ban raw branch/domain primitives in core (P0 §4).
+"""AST audit: ban raw branch/domain primitives in the NumPy exact core (P0 §4).
 
-Core code must route these through droad.branches wrappers instead of calling
-`np.where`, `jnp.where`, `lax.cond`, `np.clip`, `np.sqrt`, `np.log`, `np.exp`,
-`np.maximum`, `np.minimum` directly.
+The NumPy exact-mode core must route these through droad.branches wrappers
+instead of calling `np.where`, `jnp.where`, `lax.cond`, `np.clip`, `np.sqrt`,
+`np.log`, `np.exp`, `np.maximum`, `np.minimum` directly.
 
-`droad/branches.py` is the ONE allowed place to call the raw primitives.
+Scope note (do not overclaim): this audit covers the *NumPy exact core* only.
+`branches.py` is the sanctioned wrapper. The JAX differentiable backend
+(`jax_model.py`, `jax_storage.py`) and `smoothing.py` are explicitly ALLOWLISTED
+— they use jnp primitives with inline domain guards and are covered instead by
+the stability tests (τ→0 convergence, exp/denominator guards), NOT by this audit.
+So a clean result means "no un-wrapped primitives in the NumPy core", not
+"every primitive in the repo is registered".
 """
 
 from __future__ import annotations

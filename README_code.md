@@ -54,9 +54,14 @@ enhanced_enthalpy 모드         →  0°C 잠열 흡수(N10 완화), enth_L=0=b
 Gauss-Newton(§7.4)            →  matrix-free JVP∘VJP+CG, 4D 초기프로파일 1e-4 복원, 3 outer 수렴
 Hutchinson UQ(§7.6)          →  matrix-free Hessian 대각 추정 = dense 대각
 순환 dual estimation(§7.8)    →  모수 0.82→0.97 정착, RMSE 11×↓, 상태보정 13×↓ (equifinality 잔여편향 정직)
-droad core raw-primitive audit→  violations: []
-pytest -q                     →  101 passed (배치 권장: pytest -m "not jax" 71, -m jax 30)
+NumPy exact-core raw-primitive audit → violations: [] (JAX/smoothing은 allowlist,
+                                       별도 안정성 테스트로 감사 — audit 대상 아님)
+pytest -q                     →  전부 통과 (배치 권장: pytest -m "not jax" core, -m jax JAX/DA)
 ```
+
+주의(정직성): `guarded_exp`가 인자를 [-60,60]으로 clip하므로 bit-exact parity는
+**fixture 도메인(no-coupling rollout) 내부**에서만 보장된다. 극단 비물리 입력에서
+reference(clip 없음)와 갈라질 수 있다 — exact parity는 정상 기상 범위 주장이다.
 
 ## 코드 리뷰 반영 (총평 하드닝)
 `pyproject`에 `jax`/`dev` extras(jax[cpu]·optax)와 pytest 마커(`jax`,`realdata`) 추가 —

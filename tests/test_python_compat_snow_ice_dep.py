@@ -132,16 +132,20 @@ def test_new_melt_freeze_heat(env, s):
     assert got.T4Melt == pytest.approx(rs.T4Melt, abs=1e-12)
 
 
+def _cp_synthetic():
+    return {"WetSnowFormR": 0.3, "WetSnowMeltR": 0.6, "TLimFreeze": -0.5,
+            "TLimMeltSnow": 0.0, "TLimMeltIce": 0.0, "TLimMeltDep": 0.0,
+            "MinSnowmms": 0.001, "MaxSnowmms": 200.0, "MinIcemms": 0.001,
+            "MaxIcemms": 100.0, "MinDepmms": 0.001, "MaxDepmms": 2.0,
+            "WatMHeat": 3.34e5, "WatDens": 1000.0, "Snow2IceFac": SNOW2ICE,
+            "forceSnowMelting": False, "forceIceMelting": False}
+
+
 def test_storage_functions_return_ledger():
     """R2: snow/ice/deposit return a well-formed StorageResult ledger."""
     from droad.ledger import StorageResult, StorageLedger
     from droad.storage import Surf, snow_storage, ice_storage, deposit_storage
-    cp = {"WetSnowFormR": 0.3, "WetSnowMeltR": 0.6, "TLimFreeze": -0.5,
-          "TLimMeltSnow": 0.0, "TLimMeltIce": 0.0, "TLimMeltDep": 0.0,
-          "MinSnowmms": 0.001, "MaxSnowmms": 200.0, "MinIcemms": 0.001,
-          "MaxIcemms": 100.0, "MinDepmms": 0.001, "MaxDepmms": 2.0,
-          "WatMHeat": 3.34e5, "WatDens": 1000.0, "Snow2IceFac": SNOW2ICE,
-          "forceSnowMelting": False, "forceIceMelting": False}
+    cp = _cp_synthetic()
     s = Surf(SrfWat=1.0, SrfSnow=2.0, SrfIce=0.5, SrfDep=0.3, TsurfAve=-1.0, WearSurf=True)
     for r in (snow_storage(s, _wearF(), 1.0, DT, cp),
               ice_storage(s, _wearF(), DT, cp),
@@ -149,6 +153,39 @@ def test_storage_functions_return_ledger():
         assert isinstance(r, StorageResult)
         assert isinstance(r.state_next, Surf)
         assert isinstance(r.ledger, StorageLedger)              # keys validated in __post_init__
+
+
+def test_ice_freeze_transfer_amount_and_flag():
+    """R2 teeth: freezing books water_to_ice == frozen water and sets freeze_event."""
+    from droad.storage import Surf, ice_storage
+    cp = _cp_synthetic()
+    r = ice_storage(Surf(SrfWat=2.0, TsurfAve=-2.0, WearSurf=False), _wearF(), DT, cp)
+    assert r.ledger.internal_transfer["water_to_ice"] == pytest.approx(2.0)
+    assert r.ledger.internal_transfer["ice_to_water"] == 0.0
+    assert r.ledger.event_flags["freeze_event"] is True
+    assert r.ledger.event_flags["melt_event"] is False
+    assert r.ledger.auxiliary_update["ice2_increase"] == pytest.approx(2.0)  # ice2 += wat
+
+
+def test_deposit_melt_transfer_amount_and_flag():
+    """R2 teeth: deposit melting books deposit_to_water and sets deposit_melt_event."""
+    from droad.storage import Surf, deposit_storage
+    cp = _cp_synthetic()
+    r = deposit_storage(Surf(SrfDep=0.5, TsurfAve=2.0, WearSurf=False), _wearF().DepWear, cp)
+    assert r.ledger.internal_transfer["deposit_to_water"] == pytest.approx(0.5)
+    assert r.ledger.event_flags["deposit_melt_event"] is True
+
+
+def test_snow_wear_books_snow_to_ice():
+    """R2 teeth: traffic wear on a cold dry snowpack books the conserved snow_to_ice
+    part (= Snow2IceFac*SnowTran), and does NOT falsely flag a melt/freeze event."""
+    from droad.storage import Surf, snow_storage
+    cp = _cp_synthetic()
+    wf = _wearF(SnowTran=0.05)
+    r = snow_storage(Surf(SrfSnow=5.0, TsurfAve=-3.0, WearSurf=True), wf, 1.0, DT, cp)
+    assert r.ledger.internal_transfer["snow_to_ice"] == pytest.approx(SNOW2ICE * 0.05)
+    assert r.ledger.event_flags["melt_event"] is False
+    assert r.ledger.event_flags["freeze_event"] is False
 
 
 def test_road_cond_aggregates_ledger():

@@ -7,6 +7,8 @@ hard counterpart as tau shrinks, and stays finite-grad at the threshold.
 import numpy as np
 import pytest
 
+pytestmark = pytest.mark.jax
+
 jax = pytest.importorskip("jax")
 from jax import config  # noqa: E402
 config.update("jax_enable_x64", True)

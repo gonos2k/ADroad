@@ -43,8 +43,11 @@ def make_step(static):
         # precipitation split (eq 42) -> smooth rain fraction over [PLimSnow, PLimRain]
         p_exp = jnp.clip(22.0 - 2.7 * Tair - 0.20 * Rhz, -60.0, 60.0)
         p_rain = 1.0 / (1.0 + jnp.exp(p_exp))
-        wfrac_raw = (p_rain - prm["PLimSnow"]) / (prm["PLimRain"] - prm["PLimSnow"])
-        wfrac = sm.soft_clip(wfrac_raw, 0.0, 1.0, 0.05)   # differentiable [0,1] ramp
+        # guard the ramp width: PLimRain must stay above PLimSnow even if a DA
+        # control nudges the thresholds together / past each other (else NaN or a
+        # sign-flipped rain/snow split).
+        den = jnp.maximum(prm["PLimRain"] - prm["PLimSnow"], 1e-4)
+        wfrac = sm.soft_clip((p_rain - prm["PLimSnow"]) / den, 0.0, 1.0, 0.05)
         Wat = Wat + prec * wfrac
         Snow = Snow + prec * (1.0 - wfrac)
 
@@ -58,8 +61,10 @@ def make_step(static):
         VSH = _hcap_vsh(TmpNw, WCont, prm, N)
         # enhanced_enthalpy (§5a, N10): latent heat absorbed near 0 C via apparent
         # heat capacity -> damps the freeze/melt temperature bounce. enth_L=0 -> off.
-        s = sm.gate(TmpNw[1:N + 1], 0.0, prm["enth_dT"])
-        VSH = VSH + prm["enth_L"] * WCont * (s * (1.0 - s) / prm["enth_dT"])
+        # enth_dT floored (same guard as gate) so the 1/dT latent term stays finite.
+        enth_dT = sm.safe_tau(prm["enth_dT"])
+        s = sm.gate(TmpNw[1:N + 1], 0.0, enth_dT)
+        VSH = VSH + prm["enth_L"] * WCont * (s * (1.0 - s) / enth_dT)
         condDZ = -(CC / DyK[:N])
         capDZ = -(1.0 / (DyC[:N] * VSH))
         GFlux0 = RNet - LE + TrfFric + BLCond * (Tmp[0] - Tmp[1])

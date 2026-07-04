@@ -73,6 +73,11 @@ def guarded_log(site, x, eps=1e-12):
 
 
 def guarded_exp(site, x, lo=-60.0, hi=60.0):
-    """exp routed through a registered site; argument clipped to avoid overflow."""
+    """exp routed through a registered site; argument clipped to avoid overflow.
+
+    Parity caveat: the reference does NOT clip. Clipping only changes the result
+    once |x|>~60 (exp already 0 or ~1e26), which is outside the physical/fixture
+    domain, so bit-exact parity holds on the fixture but not for arbitrary extreme
+    inputs. Documented in README (exact parity = normal-range claim)."""
     assert_branch_registered(site, "guarded_math")
     return np.exp(np.clip(x, lo, hi))

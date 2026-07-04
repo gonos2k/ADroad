@@ -18,6 +18,8 @@ from pathlib import Path
 import numpy as np
 import pytest
 
+pytestmark = [pytest.mark.jax, pytest.mark.realdata]
+
 sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
 from tools.run_no_coupling import build_model, RSP_SRC  # noqa: E402
 

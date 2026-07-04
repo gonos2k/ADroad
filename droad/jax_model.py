@@ -25,6 +25,12 @@ def _safe_exp(z):
     return jnp.exp(jnp.clip(z, -60.0, 60.0))
 
 
+def _safe_den(x, eps=1e-6):
+    """Keep a denominator away from 0 (preserves sign) so a stress-test / DA
+    excursion to unphysical temperatures can't produce inf/NaN gradients."""
+    return jnp.where(jnp.abs(x) < eps, jnp.where(x < 0, -eps, eps), x)
+
+
 def _blc_v0(Tsurf, Tair, VZ, Rhz, BLCond0, SrfWat, dt, p, n_iter=40):
     TaK = Tair + 273.15
     AirDens = 100000.0 / (287.05 * TaK)
@@ -52,12 +58,13 @@ def _blc_v0(Tsurf, Tair, VZ, Rhz, BLCond0, SrfWat, dt, p, n_iter=40):
     Raero = jnp.minimum(Raero, 30.0)
 
     PsychC = 0.1 * (0.00063 * TaK + 0.47496)
-    # saturation vapor pressure; denominators guarded away from 0 and exp arg
-    # clipped so the unselected branch cannot poison the gradient.
-    ds_i = jnp.where(Tsurf < 0.0, Tsurf + 265.5, 1.0)
-    ds_w = jnp.where(Tsurf < 0.0, 1.0, Tsurf + 237.3)
-    da_i = jnp.where(Tair < 0.0, Tair + 265.5, 1.0)
-    da_w = jnp.where(Tair < 0.0, 1.0, Tair + 237.3)
+    # saturation vapor pressure; denominators guarded away from 0 (both the
+    # selected value and the unselected branch) and exp arg clipped, so neither
+    # branch can poison the gradient even at unphysical stress-test temperatures.
+    ds_i = jnp.where(Tsurf < 0.0, _safe_den(Tsurf + 265.5), 1.0)
+    ds_w = jnp.where(Tsurf < 0.0, 1.0, _safe_den(Tsurf + 237.3))
+    da_i = jnp.where(Tair < 0.0, _safe_den(Tair + 265.5), 1.0)
+    da_w = jnp.where(Tair < 0.0, 1.0, _safe_den(Tair + 237.3))
     esat_s = jnp.where(Tsurf < 0.0,
                        0.61078 * _safe_exp(21.875 * Tsurf / ds_i),
                        0.61078 * _safe_exp(17.269 * Tsurf / ds_w))
