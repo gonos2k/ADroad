@@ -1,0 +1,18 @@
+{
+  "fixture": "no_coupling",
+  "repo": "RoadSurf-Python",
+  "commit": "61b5ee1864e1d5b6e2cdafce67a2dc9544520335",
+  "config": {
+    "use_coupling": false,
+    "timeStep_s": 30.0,
+    "init_length_h": 48,
+    "forecast_length_h": 60,
+    "forecast_start": "2021-03-04T03:00:00",
+    "lat": 62.246,
+    "lon": 25.769,
+    "outputStep_min": 15
+  },
+  "input_sha256": "b5967e837902d25cf5f4c75cf7533b295d52c96eba526d6ab7da4b0097d1df8c",
+  "output_sha256": "04d78a2e084127f3b51cad367656e85540a416aab7635143a2bb3413b33899d5",
+  "output_rows": 432
+}

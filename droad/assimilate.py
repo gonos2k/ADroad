@@ -1,0 +1,97 @@
+"""Gradient-based estimation driver (§7): variational DA + parameter calibration.
+
+Minimizes a scalar loss over a pytree of control variables (physical params
+and/or initial state) using optax. The gradient is a single reverse-mode pass
+(VJP / adjoint), so cost is independent of the control dimension.
+"""
+
+from __future__ import annotations
+
+import jax
+import jax.numpy as jnp
+import optax
+
+
+def hvp(f, x, v):
+    """Hessian-vector product via forward-over-reverse (§7.4). Matrix-free."""
+    return jax.jvp(jax.grad(f), (x,), (v,))[1]
+
+
+def newton(loss_fn, x0, steps=6, damping=1e-10):
+    """Dense Newton for small control vectors (§7.4). Uses exact Hessian solve."""
+    x = x0
+    eye = jnp.eye(x.shape[0])
+    for _ in range(steps):
+        g = jax.grad(loss_fn)(x)
+        H = jax.hessian(loss_fn)(x)
+        dz = jnp.linalg.solve(H + damping * eye, -g)
+        x = x + dz
+    return x
+
+
+def laplace_cov(loss_fn, x_opt):
+    """Laplace posterior covariance ~ inv(Hessian) at optimum (§7.6)."""
+    H = jax.hessian(loss_fn)(x_opt)
+    return jnp.linalg.inv(H)
+
+
+def hutchinson_diag(loss_fn, x, n_samples=200, seed=0):
+    """Matrix-free stochastic estimate of diag(Hessian) via HVP (§7.6, M-H3).
+
+    Unbiased Hutchinson estimator: E[v ⊙ Hv] with Rademacher v. Never forms H,
+    so it scales to high-dimensional controls. Posterior variance ~ 1/diag.
+    """
+    key = jax.random.PRNGKey(seed)
+
+    def one(k):
+        v = jax.random.rademacher(k, x.shape, dtype=x.dtype)
+        return v * hvp(loss_fn, x, v)
+
+    return jnp.mean(jax.vmap(one)(jax.random.split(key, n_samples)), axis=0)
+
+
+def gauss_newton(residual, z0, outer=5, cg_maxiter=40, damping=1e-8):
+    """Matrix-free Gauss-Newton / incremental 4D-Var (§7.4).
+
+    Minimizes 0.5*||residual(z)||^2. Each outer step linearizes once and solves
+    (JᵀJ + damping) dz = -Jᵀ r by CG, using only JVP (Jv) and VJP (Jᵀv) — never
+    forming J or the Hessian (scales to high-dim controls).
+    """
+    import jax.scipy.sparse.linalg as jssl
+
+    z = z0
+    for _ in range(outer):
+        r0, Jv = jax.linearize(residual, z)      # Jv: tangent -> residual tangent
+        JT = jax.linear_transpose(Jv, z)         # residual cotangent -> control
+
+        def A(v):
+            (jt,) = JT(Jv(v))
+            return jt + damping * v
+
+        (neg_b,) = JT(r0)
+        dz, _ = jssl.cg(A, -neg_b, maxiter=cg_maxiter)
+        z = z + dz
+    return z
+
+
+def fit(loss_fn, init, steps=300, lr=0.05, optimizer=None):
+    """Minimize loss_fn(control) from `init` (any pytree).
+
+    Returns (best_control, history) where history is a list of scalar losses.
+    """
+    opt = optimizer if optimizer is not None else optax.adam(lr)
+    control = init
+    state = opt.init(control)
+    value_and_grad = jax.value_and_grad(loss_fn)
+
+    @jax.jit
+    def update(control, state):
+        loss, grad = value_and_grad(control)
+        updates, state = opt.update(grad, state, control)
+        return optax.apply_updates(control, updates), state, loss
+
+    history = []
+    for _ in range(steps):
+        control, state, loss = update(control, state)
+        history.append(float(loss))
+    return control, history
