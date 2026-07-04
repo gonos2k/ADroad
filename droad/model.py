@@ -12,7 +12,7 @@ from .boundary import calc_blc_and_le
 from .radiation import calc_rnet
 from .thermal import calc_hcap_hcond, calc_cap_cond, calc_profile, calc_hstor
 from .storage import (
-    calc_prec_type, wear_factors, melting, calc_albedo,
+    calc_prec_type, precipitation_to_storage, wear_factors, melting, calc_albedo,
 )
 from .roadcond import road_cond
 
@@ -55,10 +55,11 @@ def step_full(*, Tmp, TmpNw, WCont, CC, ZDpth, DyK, DyC, surf, Albedo, BLCond,
     Mirrors RoadSurf-Python roadModelOneStep for the no-sky-view case.
     `surf` is a storage.Surf; returns dict with new TmpNw, TsurfAve, BLCond,
     Albedo, and the updated Surf."""
-    # 1) precipitation -> storage
+    # 1) precipitation -> storage (via the ledgered contract)
     pt = calc_prec_type(prec_in_tstep, prec_phase, Tair, Rhz, DTSecs, cp)
-    surf = replace(surf, SrfWat=surf.SrfWat + pt.RainmmTS,
-                   SrfSnow=surf.SrfSnow + pt.SnowmmTS)
+    SrfWat_new, SrfSnow_new, prec_ledger = precipitation_to_storage(
+        surf.SrfWat, surf.SrfSnow, surf.SrfIce, surf.SrfDep, pt)
+    surf = replace(surf, SrfWat=SrfWat_new, SrfSnow=SrfSnow_new)
 
     # 2) balance (day/night -> BLC -> net radiation -> conduction -> melting)
     TrfFric, VZc, _ = set_day_dependent(hour, VZ, day)
@@ -82,11 +83,13 @@ def step_full(*, Tmp, TmpNw, WCont, CC, ZDpth, DyK, DyC, surf, Albedo, BLCond,
     wf = wear_factors(surf.SrfSnow, surf.SrfIce, surf.SrfIce2, surf.SrfDep,
                       surf.SrfWat, Tph)
     cp2 = {**cp, "Snow2IceFac": wf.Snow2IceFac}
-    surf = road_cond(surf, wf, MaxPormms, DTSecs, cp2)
+    rc = road_cond(surf, wf, MaxPormms, DTSecs, cp2)
+    surf = rc.state_next
 
     # 5) albedo
     Albedo = calc_albedo(surf.WearSurf, surf.SrfSnow, surf.SrfIce, surf.SrfIce2,
                          surf.SrfDep, Albedo, cp)
 
     return {"TmpNw": Tmp_final, "TsurfAve": surf.TsurfAve, "BLCond": BLCond,
-            "Albedo": Albedo, "surf": surf}
+            "Albedo": Albedo, "surf": surf,
+            "prec_ledger": prec_ledger, "cond_ledger": rc.ledger}

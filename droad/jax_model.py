@@ -20,6 +20,11 @@ config.update("jax_enable_x64", True)
 _EPS = 1e-12
 
 
+def _safe_exp(z):
+    """exp with the argument clipped to avoid inf/NaN in the gradient."""
+    return jnp.exp(jnp.clip(z, -60.0, 60.0))
+
+
 def _blc_v0(Tsurf, Tair, VZ, Rhz, BLCond0, SrfWat, dt, p, n_iter=40):
     TaK = Tair + 273.15
     AirDens = 100000.0 / (287.05 * TaK)
@@ -47,12 +52,18 @@ def _blc_v0(Tsurf, Tair, VZ, Rhz, BLCond0, SrfWat, dt, p, n_iter=40):
     Raero = jnp.minimum(Raero, 30.0)
 
     PsychC = 0.1 * (0.00063 * TaK + 0.47496)
-    esat_s = jnp.where(Tsurf < 0,
-                       0.61078 * jnp.exp(21.875 * Tsurf / (Tsurf + 265.5)),
-                       0.61078 * jnp.exp(17.269 * Tsurf / (Tsurf + 237.3)))
-    esat_a = jnp.where(Tair < 0,
-                       0.61078 * jnp.exp(21.875 * Tair / (Tair + 265.5)),
-                       0.61078 * jnp.exp(17.269 * Tair / (Tair + 237.3)))
+    # saturation vapor pressure; denominators guarded away from 0 and exp arg
+    # clipped so the unselected branch cannot poison the gradient.
+    ds_i = jnp.where(Tsurf < 0.0, Tsurf + 265.5, 1.0)
+    ds_w = jnp.where(Tsurf < 0.0, 1.0, Tsurf + 237.3)
+    da_i = jnp.where(Tair < 0.0, Tair + 265.5, 1.0)
+    da_w = jnp.where(Tair < 0.0, 1.0, Tair + 237.3)
+    esat_s = jnp.where(Tsurf < 0.0,
+                       0.61078 * _safe_exp(21.875 * Tsurf / ds_i),
+                       0.61078 * _safe_exp(17.269 * Tsurf / ds_w))
+    esat_a = jnp.where(Tair < 0.0,
+                       0.61078 * _safe_exp(21.875 * Tair / da_i),
+                       0.61078 * _safe_exp(17.269 * Tair / da_w))
     EAir = jnp.minimum(0.01 * Rhz, 1.0) * esat_a
     LE = (AirDens * AirHCap * (esat_s - EAir)) / (PsychC * Raero)
     LE = jnp.where((LE > 0.0) & (SrfWat <= 0.0), 0.0, LE)   # no-water gate

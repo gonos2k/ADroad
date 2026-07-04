@@ -41,9 +41,10 @@ def make_step(static):
         Tsurf = (Tmp[1] + Tmp[2]) / 2.0
 
         # precipitation split (eq 42) -> smooth rain fraction over [PLimSnow, PLimRain]
-        p_exp = 22.0 - 2.7 * Tair - 0.20 * Rhz
+        p_exp = jnp.clip(22.0 - 2.7 * Tair - 0.20 * Rhz, -60.0, 60.0)
         p_rain = 1.0 / (1.0 + jnp.exp(p_exp))
-        wfrac = jnp.clip((p_rain - prm["PLimSnow"]) / (prm["PLimRain"] - prm["PLimSnow"]), 0.0, 1.0)
+        wfrac_raw = (p_rain - prm["PLimSnow"]) / (prm["PLimRain"] - prm["PLimSnow"])
+        wfrac = sm.soft_clip(wfrac_raw, 0.0, 1.0, 0.05)   # differentiable [0,1] ramp
         Wat = Wat + prec * wfrac
         Snow = Snow + prec * (1.0 - wfrac)
 
@@ -80,7 +81,9 @@ def make_step(static):
         mms = sm.transfer(Snow, melt_g)                               # snow -> water
         Snow, Wat = Snow - mms, Wat + mms
 
-        # non-negativity / overflow (subgradient clamps)
+        # non-negativity / overflow: hard clip (subgradient OK). A soft clamp at
+        # the 0 floor would add ~tau*log2 spurious mass even when dry, breaking
+        # the dry-reduction invariant, so the lower bound stays a hard projection.
         Wat = jnp.clip(Wat, 0.0, prm["MaxWatmms"])
         Ice = jnp.clip(Ice, 0.0, prm["MaxIcemms"])
         Snow = jnp.clip(Snow, 0.0, prm["MaxSnowmms"])

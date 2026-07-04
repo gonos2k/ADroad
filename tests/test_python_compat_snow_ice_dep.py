@@ -77,7 +77,7 @@ def test_snow_storage(env, s):
     rs, atm = _ref_surf(s), SimpleNamespace(SnowType=s.SnowType)
     cp.Snow2IceFac, cp.forceSnowMelting = SNOW2ICE, False
     m["Storage"].SnowStorage(0.0, DT, _wearF(), 1.0, rs, cp, atm)
-    got = snow_storage(s, _wearF(), 1.0, DT, _cp(cp))
+    got = snow_storage(s, _wearF(), 1.0, DT, _cp(cp)).state_next
     _assert_storages(got, rs)
     assert got.SnowType == atm.SnowType
 
@@ -96,7 +96,7 @@ def test_ice_storage(env, s):
     rs = _ref_surf(s)
     cp.forceIceMelting = False
     m["Storage"].IceStorage(0.0, DT, rs, cp, _wearF())
-    got = ice_storage(s, _wearF(), DT, _cp(cp))
+    got = ice_storage(s, _wearF(), DT, _cp(cp)).state_next
     _assert_storages(got, rs)
 
 
@@ -113,7 +113,7 @@ def test_deposit_storage(env, s):
     m, cp = env
     rs = _ref_surf(s)
     m["Storage"].DepositStorage(_wearF().DepWear, rs, cp)
-    got = deposit_storage(s, _wearF().DepWear, _cp(cp))
+    got = deposit_storage(s, _wearF().DepWear, _cp(cp)).state_next
     _assert_storages(got, rs)
 
 
@@ -130,3 +130,48 @@ def test_new_melt_freeze_heat(env, s):
     got = new_melt_freeze_heat(s, DT, _cp(cp))
     assert got.Q2Melt == pytest.approx(rs.Q2Melt, abs=1e-9)
     assert got.T4Melt == pytest.approx(rs.T4Melt, abs=1e-12)
+
+
+def test_storage_functions_return_ledger():
+    """R2: snow/ice/deposit return a well-formed StorageResult ledger."""
+    from droad.ledger import StorageResult, StorageLedger
+    from droad.storage import Surf, snow_storage, ice_storage, deposit_storage
+    cp = {"WetSnowFormR": 0.3, "WetSnowMeltR": 0.6, "TLimFreeze": -0.5,
+          "TLimMeltSnow": 0.0, "TLimMeltIce": 0.0, "TLimMeltDep": 0.0,
+          "MinSnowmms": 0.001, "MaxSnowmms": 200.0, "MinIcemms": 0.001,
+          "MaxIcemms": 100.0, "MinDepmms": 0.001, "MaxDepmms": 2.0,
+          "WatMHeat": 3.34e5, "WatDens": 1000.0, "Snow2IceFac": SNOW2ICE,
+          "forceSnowMelting": False, "forceIceMelting": False}
+    s = Surf(SrfWat=1.0, SrfSnow=2.0, SrfIce=0.5, SrfDep=0.3, TsurfAve=-1.0, WearSurf=True)
+    for r in (snow_storage(s, _wearF(), 1.0, DT, cp),
+              ice_storage(s, _wearF(), DT, cp),
+              deposit_storage(s, _wearF().DepWear, cp)):
+        assert isinstance(r, StorageResult)
+        assert isinstance(r.state_next, Surf)
+        assert isinstance(r.ledger, StorageLedger)              # keys validated in __post_init__
+
+
+def test_road_cond_aggregates_ledger():
+    """R2: road_cond returns a StorageResult whose ledger merges the sub-steps."""
+    from droad.ledger import StorageResult
+    from droad.roadcond import road_cond
+    from droad.storage import Surf, wear_factors
+    cp = {"WetSnowFormR": 0.3, "WetSnowMeltR": 0.6, "TLimFreeze": -0.5,
+          "TLimMeltSnow": 0.0, "TLimMeltIce": 0.0, "TLimMeltDep": 0.0,
+          "TLimColdH": -2.0, "TLimColdL": -4.0, "TLimDew": 0.0, "PorEvaF": 0.5,
+          "WWearLim": 0.05, "WWetLim": 0.5, "DampWearF": 0.5, "MinWatmms": 0.001,
+          "MaxWatmms": 1.0, "MinSnowmms": 0.001, "MaxSnowmms": 200.0,
+          "MinIcemms": 0.001, "MaxIcemms": 100.0, "MinDepmms": 0.001,
+          "MaxDepmms": 2.0, "WatMHeat": 3.34e5, "WatDens": 1000.0,
+          "Snow2IceFac": SNOW2ICE, "forceSnowMelting": False, "forceIceMelting": False}
+    s = Surf(SrfWat=0.5, SrfSnow=1.0, SrfIce=0.2, TsurfAve=-1.0, WearSurf=True)
+    r = road_cond(s, wear_factors(s.SrfSnow, s.SrfIce, s.SrfIce2, s.SrfDep, s.SrfWat, 1.0),
+                  1.0, DT, cp)
+    assert isinstance(r, StorageResult)
+    # merged span: before = entry primary mass, after = final primary mass
+    entry = s.SrfWat + s.SrfSnow + s.SrfIce + s.SrfDep
+    final = r.state_next.SrfWat + r.state_next.SrfSnow + r.state_next.SrfIce + r.state_next.SrfDep
+    assert r.ledger.primary_before == pytest.approx(entry)
+    assert r.ledger.primary_after_actual == pytest.approx(final)
+    # residual telescopes to ~0 (external flows account for the net change)
+    assert abs(r.ledger.primary_mass_residual) < 1e-9

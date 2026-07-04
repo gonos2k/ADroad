@@ -18,9 +18,24 @@ import numpy as np
 from .branches import safe_where
 
 
+def _require(name, arr, n):
+    """Fail fast on a mis-shaped array (clearer than a later broadcast error)."""
+    if len(arr) != n:
+        raise ValueError(f"{name}: expected length {n}, got {len(arr)}")
+
+
 def calc_hcap_hcond(TmpNw, WCont, CC, ZDpth, NLayers, DTSecs, phy, BLCond):
     """Volumetric heat capacity (VSH), heat capacity in intensity units (HS),
     and layer conductance (GCond). Returns (VSH, HS, GCond)."""
+    if NLayers <= 0:
+        raise ValueError(f"NLayers must be positive, got {NLayers}")
+    if DTSecs <= 0:
+        raise ValueError(f"DTSecs must be positive, got {DTSecs}")
+    _require("TmpNw", TmpNw, NLayers + 2)
+    _require("WCont", WCont, NLayers)
+    _require("CC", CC, NLayers)
+    _require("ZDpth", ZDpth, NLayers + 1)
+
     t = TmpNw[1:NLayers + 1]                       # layer temperatures
     t2 = t * t
 
@@ -68,6 +83,9 @@ def calc_hstor(Tmp, TmpNw, HS0):
 def calc_profile(Tmp, condDZ, capDZ, NLayers, DTSecs, TrfFric, BLCond, RNet, LE_Flux):
     """One explicit time step of the ground temperature profile.
     Returns (TmpNw, GroundFlux)."""
+    _require("Tmp", Tmp, NLayers + 2)
+    _require("condDZ", condDZ, NLayers)
+    _require("capDZ", capDZ, NLayers)
     GFlux = np.empty(NLayers + 2)
     sensible = BLCond * (Tmp[0] - Tmp[1])
     GFlux[0] = RNet - LE_Flux + TrfFric + sensible

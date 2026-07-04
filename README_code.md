@@ -55,8 +55,17 @@ Gauss-Newton(§7.4)            →  matrix-free JVP∘VJP+CG, 4D 초기프로파
 Hutchinson UQ(§7.6)          →  matrix-free Hessian 대각 추정 = dense 대각
 순환 dual estimation(§7.8)    →  모수 0.82→0.97 정착, RMSE 11×↓, 상태보정 13×↓ (equifinality 잔여편향 정직)
 droad core raw-primitive audit→  violations: []
-pytest -q                     →  100 passed (23 파일)
+pytest -q                     →  101 passed (배치 권장: pytest -m "not jax" 71, -m jax 30)
 ```
+
+## 코드 리뷰 반영 (총평 하드닝)
+`pyproject`에 `jax`/`dev` extras(jax[cpu]·optax)와 pytest 마커(`jax`,`realdata`) 추가 —
+`pytest -m "not jax"`로 순수 NumPy 코어만 실행 가능. `smoothing.gate` τ 하한·인자 클립·`jax.nn.sigmoid`,
+`soft_clip` 추가. `jax_model` 포화수증기 `exp` 인자/분모 가드, `branches.guarded_exp` 오버플로 클립.
+`assimilate.fit` best-control 추적, `newton`/`laplace_cov` Hessian 대칭화+damping.
+`dual_estimation` `theta_before/after` 분리·선택적 sigmoid 범위제약. `thermal` 입력 shape 검증.
+저장 계약 관통: `snow/ice/deposit_storage`→`StorageResult`, `road_cond`가 `merge_ledgers`로 집계,
+`step_full`이 `precipitation_to_storage` 사용.
 reference/RoadSurf-Python은 commit 61b5ee1 사본. fixture 재생성: `python tools/run_no_coupling.py`.
 
 | 6(M2a) | `droad/storage.py` (`calc_prec_type`, `precipitation_to_storage`) | 강수 상변화(eq 42 시그모이드)+저장 투입. 전 스텝(강수 포함) reference와 1e-12 일치, ledger 질량보존 | `tests/test_python_compat_storage.py` |

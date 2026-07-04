@@ -72,7 +72,7 @@ def guarded_log(site, x, eps=1e-12):
     return np.log(np.maximum(x, eps))
 
 
-def guarded_exp(site, x):
-    """exp routed through a registered site (domain-safe; guards overflow later)."""
+def guarded_exp(site, x, lo=-60.0, hi=60.0):
+    """exp routed through a registered site; argument clipped to avoid overflow."""
     assert_branch_registered(site, "guarded_math")
-    return np.exp(x)
+    return np.exp(np.clip(x, lo, hi))

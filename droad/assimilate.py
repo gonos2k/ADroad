@@ -17,22 +17,30 @@ def hvp(f, x, v):
     return jax.jvp(jax.grad(f), (x,), (v,))[1]
 
 
+def _sym(H):
+    """Symmetrize a Hessian (kills asymmetry from finite-precision autodiff)."""
+    return 0.5 * (H + H.T)
+
+
 def newton(loss_fn, x0, steps=6, damping=1e-10):
-    """Dense Newton for small control vectors (§7.4). Uses exact Hessian solve."""
+    """Dense Newton for small control vectors (§7.4). Uses exact Hessian solve.
+    The Hessian is symmetrized and Levenberg-damped before each solve."""
     x = x0
     eye = jnp.eye(x.shape[0])
     for _ in range(steps):
         g = jax.grad(loss_fn)(x)
-        H = jax.hessian(loss_fn)(x)
+        H = _sym(jax.hessian(loss_fn)(x))
         dz = jnp.linalg.solve(H + damping * eye, -g)
         x = x + dz
     return x
 
 
-def laplace_cov(loss_fn, x_opt):
-    """Laplace posterior covariance ~ inv(Hessian) at optimum (§7.6)."""
-    H = jax.hessian(loss_fn)(x_opt)
-    return jnp.linalg.inv(H)
+def laplace_cov(loss_fn, x_opt, damping=1e-10):
+    """Laplace posterior covariance ~ inv(Hessian) at optimum (§7.6).
+    Hessian symmetrized + jitter-damped so the inverse stays SPD/stable."""
+    H = _sym(jax.hessian(loss_fn)(x_opt))
+    eye = jnp.eye(H.shape[0])
+    return jnp.linalg.inv(H + damping * eye)
 
 
 def hutchinson_diag(loss_fn, x, n_samples=200, seed=0):
@@ -77,7 +85,10 @@ def gauss_newton(residual, z0, outer=5, cg_maxiter=40, damping=1e-8):
 def fit(loss_fn, init, steps=300, lr=0.05, optimizer=None):
     """Minimize loss_fn(control) from `init` (any pytree).
 
-    Returns (best_control, history) where history is a list of scalar losses.
+    Returns (best_control, history): best_control is the iterate with the lowest
+    observed loss (not simply the last), so a late divergent step can't undo a
+    good solution. history is the list of scalar losses (loss at each iterate,
+    measured before that step's update).
     """
     opt = optimizer if optimizer is not None else optax.adam(lr)
     control = init
@@ -91,7 +102,12 @@ def fit(loss_fn, init, steps=300, lr=0.05, optimizer=None):
         return optax.apply_updates(control, updates), state, loss
 
     history = []
+    best_control, best_loss = control, float("inf")
     for _ in range(steps):
+        prev = control                       # iterate whose loss we measure
         control, state, loss = update(control, state)
-        history.append(float(loss))
-    return control, history
+        loss = float(loss)
+        history.append(loss)
+        if loss < best_loss:
+            best_loss, best_control = loss, prev
+    return best_control, history

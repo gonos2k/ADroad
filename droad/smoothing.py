@@ -15,11 +15,21 @@ Contract:
 
 from __future__ import annotations
 
+import jax.nn as jnn
 import jax.numpy as jnp
+
+_TAU_MIN = 1e-6      # floor on gate/clamp widths (tau may be a DA control)
+_Z_CLIP = 60.0       # bound the sigmoid/softplus argument (avoid exp overflow)
+
+
+def _safe_tau(tau):
+    return jnp.maximum(tau, _TAU_MIN)
 
 
 def gate(x, thr, tau):
-    return 1.0 / (1.0 + jnp.exp(-(x - thr) / tau))
+    """Smooth step in [0,1]. Guards tau>0 and clips the argument (no overflow)."""
+    z = jnp.clip((x - thr) / _safe_tau(tau), -_Z_CLIP, _Z_CLIP)
+    return jnn.sigmoid(z)
 
 
 def select(x, thr, tau, hi, lo):
@@ -28,12 +38,21 @@ def select(x, thr, tau, hi, lo):
 
 
 def soft_min(x, cap, tau):
-    # cap - softplus(cap - x)  (tau-scaled)
+    # cap - softplus(cap - x). logaddexp is numerically stable (no overflow) and
+    # its linear regime is what makes tau->0 converge to hard min, so the
+    # argument must NOT be clipped here. Only tau is floored.
+    tau = _safe_tau(tau)
     return cap - tau * jnp.logaddexp(0.0, (cap - x) / tau)
 
 
 def soft_max(x, flr, tau):
+    tau = _safe_tau(tau)
     return flr + tau * jnp.logaddexp(0.0, (x - flr) / tau)
+
+
+def soft_clip(x, lo, hi, tau):
+    """Differentiable clamp to [lo, hi] (soft_max then soft_min)."""
+    return soft_min(soft_max(x, lo, tau), hi, tau)
 
 
 def transfer(available, g):

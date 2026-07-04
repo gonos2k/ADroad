@@ -6,7 +6,9 @@ requires-python = ">=3.10"
 dependencies = ["numpy>=1.24"]
 
 [project.optional-dependencies]
-dev = ["pytest>=7"]
+# Differentiable / DA path (JAX). Core NumPy reference & tests run without these.
+jax = ["jax[cpu]>=0.4", "optax>=0.2"]
+dev = ["pytest>=7", "jax[cpu]>=0.4", "optax>=0.2"]
 
 [build-system]
 requires = ["setuptools>=68"]
@@ -17,3 +19,9 @@ include = ["droad*"]
 
 [tool.pytest.ini_options]
 testpaths = ["tests"]
+markers = [
+    "jax: tests requiring jax/optax (differentiable / DA path)",
+    "realdata: tests using the RoadSurf-Python reference / real observations",
+]
+# Run only the pure-NumPy core:      pytest -m "not jax"
+# Run only the differentiable path:  pytest -m jax
