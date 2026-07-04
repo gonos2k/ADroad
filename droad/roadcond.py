@@ -53,6 +53,7 @@ def road_cond(s, wf, MaxPormms, DTSecs, cp) -> StorageResult:
     rs = snow_storage(s, wf, MaxPormms, DTSecs, cp); s = rs.state_next
     ri = ice_storage(s, wf, DTSecs, cp); s = ri.state_next
     rd = deposit_storage(s, wf.DepWear, cp); s = rd.state_next
+    diagnostics = rs.diagnostics + ri.diagnostics + rd.diagnostics
 
     before_clamp = _prim(s)                          # water limits re-check
     w = s.SrfWat
@@ -65,4 +66,4 @@ def road_cond(s, wf, MaxPormms, DTSecs, cp) -> StorageResult:
 
     s = new_melt_freeze_heat(s, DTSecs, cp)          # no primary-mass change
     ledger = merge_ledgers(lw, rs.ledger, ri.ledger, rd.ledger, lclamp)
-    return StorageResult(s, ledger)
+    return StorageResult(s, ledger, diagnostics)

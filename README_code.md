@@ -63,6 +63,13 @@ pytest -q                     →  전부 통과 (배치 권장: pytest -m "not 
 **fixture 도메인(no-coupling rollout) 내부**에서만 보장된다. 극단 비물리 입력에서
 reference(clip 없음)와 갈라질 수 있다 — exact parity는 정상 기상 범위 주장이다.
 
+## 코드 리뷰 반영 (4차: diagnostic richness)
+residual(=코드 누출 탐지)과 **분리된** 물리 feasibility 진단을 `StorageResult.diagnostics`에
+추가: over-melt(available 초과 융해), negative-pre-clamp, overflow(hard-projection hit).
+mass 회계에는 영향 없음(clamp import/export가 external로 기록되어 residual은 여전히 0).
+`road_cond`가 자식 진단을 집계하고 `step_full`이 `diagnostics`로 노출. `full_rollout(return_ledger=True)`가
+이제 step마다 merged `step_ledger`(+`ledger_detail`, `diagnostics`)를 저장 — step_full과 감사 API 정합.
+
 ## 코드 리뷰 반영 (3차: ledger 감사화)
 `_phase_ledger`가 external source/sink를 net delta로 후처리하지 않고 **branch 지점에서
 직접 누적** — residual이 이제 "설명 안 된 mass leak" 탐지기(정상=0, 누락 시 ≠0). transfer

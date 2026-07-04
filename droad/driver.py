@@ -56,8 +56,11 @@ def full_rollout(*, Tair, VZ, Rhz, SW, LW, TSurfObs, hours, prec_phase, prec_in_
                  inCouplingPhase=False, TsurfObsLast=-9999.0, return_ledger=False):
     """Free-running full model (dry + storage/phase-change). Returns a dict of
     per-step trajectories (Tsurf + 5 storages). With return_ledger=True the dict
-    also carries out["ledger"] = list of (prec_ledger, cond_ledger) per step, so
-    mass accounting / phase-transfer diagnostics can be inspected post-hoc."""
+    also carries, per step:
+      out["ledger"]        = the merged full-step StorageLedger (precip + condition)
+      out["ledger_detail"] = (prec_ledger, cond_ledger) for drilling in
+      out["diagnostics"]   = tuple of feasibility flags (over-melt, overflow, ...)
+    so mass accounting and phase diagnostics can be inspected post-hoc."""
     Tmp = np.array(Tmp0, float).copy()
     TmpNw = np.array(TmpNw0, float).copy()
     surf, Albedo, BLCond = surf0, Albedo0, BLCond0
@@ -65,7 +68,9 @@ def full_rollout(*, Tair, VZ, Rhz, SW, LW, TSurfObs, hours, prec_phase, prec_in_
     out = {k: np.empty(n_steps) for k in
            ("Tsurf", "Snow", "Water", "Ice", "Ice2", "Dep")}
     if return_ledger:
-        out["ledger"] = []
+        out["ledger"] = []          # merged full-step ledger per step
+        out["ledger_detail"] = []   # (prec, cond) per step
+        out["diagnostics"] = []     # feasibility flags per step
 
     for i in range(n_steps):
         Tmp[0] = Tair[i]                                   # SetCurrentValues
@@ -95,7 +100,9 @@ def full_rollout(*, Tair, VZ, Rhz, SW, LW, TSurfObs, hours, prec_phase, prec_in_
         out["Ice2"][i] = surf.SrfIce2
         out["Dep"][i] = surf.SrfDep
         if return_ledger:
-            out["ledger"].append((r["prec_ledger"], r["cond_ledger"]))
+            out["ledger"].append(r["step_ledger"])
+            out["ledger_detail"].append((r["prec_ledger"], r["cond_ledger"]))
+            out["diagnostics"].append(r["diagnostics"])
 
     return out
 

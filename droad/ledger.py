@@ -103,6 +103,11 @@ class StorageLedger:
 class StorageResult:
     state_next: object
     ledger: StorageLedger
+    # physics/numerical feasibility diagnostics — SEPARATE from the mass ledger.
+    # The ledger residual detects code-accounting leaks; these flag physically
+    # notable events (over-melt, negative-before-clamp, hard-projection hits) that
+    # are mass-conserving but relevant to the deviation budget. Never affects mass.
+    diagnostics: tuple = ()
 
 
 def make_ledger(

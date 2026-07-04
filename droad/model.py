@@ -97,4 +97,4 @@ def step_full(*, Tmp, TmpNw, WCont, CC, ZDpth, DyK, DyC, surf, Albedo, BLCond,
     return {"TmpNw": Tmp_final, "TsurfAve": surf.TsurfAve, "BLCond": BLCond,
             "Albedo": Albedo, "surf": surf,
             "prec_ledger": prec_ledger, "cond_ledger": rc.ledger,
-            "step_ledger": step_ledger}
+            "step_ledger": step_ledger, "diagnostics": rc.diagnostics}

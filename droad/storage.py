@@ -210,6 +210,7 @@ def snow_storage(s: Surf, wearF, MaxPormms, DTSecs, cp) -> StorageResult:
     ice2_in = ice2
     tr = {}                                       # internal transfer amounts (per branch)
     ext_src = ext_sink = 0.0                       # external in/out (per branch)
+    diag = []                                      # feasibility diagnostics (not mass)
     freeze_event = melt_event = False
 
     ext = max(wat - MaxPormms, 0.0)
@@ -237,6 +238,8 @@ def snow_storage(s: Surf, wearF, MaxPormms, DTSecs, cp) -> StorageResult:
             snow = 0.0
         elif s.Q2Melt > 0.0 and s.TsurfAve >= cp["TLimMeltSnow"]:
             amt = 1000.0 * (s.Q2Melt * DTSecs) / (cp["WatMHeat"] * cp["WatDens"])
+            if amt > snow:                          # energy-unlimited (reference quirk)
+                diag.append("snow_over_melt")
             tr["snow_to_water"] = tr.get("snow_to_water", 0.0) + amt
             melt_event = True
             snow -= amt
@@ -270,6 +273,10 @@ def snow_storage(s: Surf, wearF, MaxPormms, DTSecs, cp) -> StorageResult:
             wat = 0.0
 
     old = snow                           # Min/Max clamp (export or, if negative, import)
+    if old < 0.0:
+        diag.append("snow_negative_pre_clamp")
+    if old > cp["MaxSnowmms"]:
+        diag.append("snow_overflow")
     if snow < cp["MinSnowmms"]:
         snow = 0.0
     if snow > cp["MaxSnowmms"]:
@@ -285,7 +292,7 @@ def snow_storage(s: Surf, wearF, MaxPormms, DTSecs, cp) -> StorageResult:
                            ext_src, ext_sink, 0.0,
                            {"freeze_event": freeze_event, "melt_event": melt_event,
                             "snow_event": False, "deposit_melt_event": False})
-    return StorageResult(s_next, ledger)
+    return StorageResult(s_next, ledger, tuple(diag))
 
 
 def ice_storage(s: Surf, wearF, DTSecs, cp) -> StorageResult:
@@ -295,6 +302,7 @@ def ice_storage(s: Surf, wearF, DTSecs, cp) -> StorageResult:
     ice2_in = ice2
     tr = {}
     ext_src = ext_sink = ice2_reset = 0.0
+    diag = []
     freeze_event = melt_event = False
 
     if s.TsurfAve < cp["TLimFreeze"] and wat > 0.0:     # freezing (water -> ice)
@@ -314,6 +322,8 @@ def ice_storage(s: Surf, wearF, DTSecs, cp) -> StorageResult:
             ice2 = 0.0
         elif s.Q2Melt > 0.0 and s.TsurfAve >= cp["TLimMeltIce"]:
             amt = 1000.0 * (s.Q2Melt * DTSecs) / (cp["WatMHeat"] * cp["WatDens"])
+            if amt > ice:                           # energy-unlimited (reference quirk)
+                diag.append("ice_over_melt")
             tr["ice_to_water"] = tr.get("ice_to_water", 0.0) + amt
             melt_event = True
             ice -= amt
@@ -326,6 +336,10 @@ def ice_storage(s: Surf, wearF, DTSecs, cp) -> StorageResult:
         ice2 -= wearF.IceWear2
 
     old = ice                                            # ice Min/Max clamp (export or import)
+    if old < 0.0:
+        diag.append("ice_negative_pre_clamp")
+    if old > cp["MaxIcemms"]:
+        diag.append("ice_overflow")
     if ice < cp["MinIcemms"]:
         ice = 0.0
     if ice > cp["MaxIcemms"]:
@@ -343,7 +357,7 @@ def ice_storage(s: Surf, wearF, DTSecs, cp) -> StorageResult:
                            ext_src, ext_sink, ice2_reset,
                            {"freeze_event": freeze_event, "melt_event": melt_event,
                             "snow_event": False, "deposit_melt_event": False})
-    return StorageResult(s_next, ledger)
+    return StorageResult(s_next, ledger, tuple(diag))
 
 
 def deposit_storage(s: Surf, DepWear, cp) -> StorageResult:
@@ -352,6 +366,7 @@ def deposit_storage(s: Surf, DepWear, cp) -> StorageResult:
     before = _primary(wat, snow, s.SrfIce, dep)
     tr = {}
     ext_src = ext_sink = 0.0
+    diag = []
     deposit_melt_event = False
 
     if s.EvapmmTS < 0.0:                 # condensation -> deposit (external source)
@@ -365,6 +380,8 @@ def deposit_storage(s: Surf, DepWear, cp) -> StorageResult:
     if s.WearSurf and snow <= 0.0 and dep > 0.0:   # wear -> external loss
         old = dep; dep -= DepWear; ext_sink += old - dep
     old = dep                            # min-clamp (export or, if negative, import)
+    if old < 0.0:
+        diag.append("deposit_negative_pre_clamp")
     if dep < cp["MinDepmms"]:
         dep = 0.0
     if dep < old:
@@ -372,6 +389,7 @@ def deposit_storage(s: Surf, DepWear, cp) -> StorageResult:
     elif dep > old:
         ext_src += dep - old
     if dep > cp["MaxDepmms"]:            # overflow -> water (internal transfer)
+        diag.append("deposit_overflow")
         tr["deposit_to_water"] = tr.get("deposit_to_water", 0.0) + (dep - cp["MaxDepmms"])
         wat += dep - cp["MaxDepmms"]
         dep = cp["MaxDepmms"]
@@ -381,7 +399,7 @@ def deposit_storage(s: Surf, DepWear, cp) -> StorageResult:
                            ext_src, ext_sink, 0.0,
                            {"freeze_event": False, "melt_event": False, "snow_event": False,
                             "deposit_melt_event": deposit_melt_event})
-    return StorageResult(s_next, ledger)
+    return StorageResult(s_next, ledger, tuple(diag))
 
 
 def new_melt_freeze_heat(s: Surf, DTSecs, cp) -> Surf:

@@ -243,6 +243,52 @@ def test_ice2_reset_recorded_on_force_melt():
     assert r.ledger.auxiliary_update["ice2_reset"] == pytest.approx(0.8)
 
 
+# --- feasibility diagnostics (separate from mass residual) ---
+
+def test_over_melt_diagnostics_but_residual_zero():
+    """Energy-unlimited melt (amt > available) is flagged in diagnostics, yet the
+    mass ledger residual stays ~0 (the clamp import is booked as external)."""
+    from droad.storage import Surf, snow_storage, ice_storage
+    cp = _cp_synthetic()
+    rs = snow_storage(Surf(SrfSnow=0.5, TsurfAve=1.0, Q2Melt=1e5, WearSurf=False),
+                      _wearF(), 1.0, DT, cp)
+    assert "snow_over_melt" in rs.diagnostics
+    assert "snow_negative_pre_clamp" in rs.diagnostics
+    assert abs(rs.ledger.primary_mass_residual) < 1e-9
+
+    ri = ice_storage(Surf(SrfIce=0.5, SrfIce2=0.5, SrfSnow=0.0, TsurfAve=1.0, Q2Melt=1e5),
+                     _wearF(), DT, cp)
+    assert "ice_over_melt" in ri.diagnostics
+    assert abs(ri.ledger.primary_mass_residual) < 1e-9
+
+
+def test_overflow_diagnostics():
+    from droad.storage import Surf, snow_storage, deposit_storage
+    cp = _cp_synthetic()
+    rs = snow_storage(Surf(SrfSnow=300.0, TsurfAve=-5.0, WearSurf=False), _wearF(), 1.0, DT, cp)
+    assert "snow_overflow" in rs.diagnostics
+    rd = deposit_storage(Surf(SrfDep=5.0, TsurfAve=-1.0, WearSurf=False), _wearF().DepWear, cp)
+    assert "deposit_overflow" in rd.diagnostics
+
+
+def test_road_cond_surfaces_diagnostics():
+    """road_cond aggregates child diagnostics into its StorageResult."""
+    from droad.storage import Surf, wear_factors
+    from droad.roadcond import road_cond
+    cp = {"WetSnowFormR": 0.3, "WetSnowMeltR": 0.6, "TLimFreeze": -0.5,
+          "TLimMeltSnow": 0.0, "TLimMeltIce": 0.0, "TLimMeltDep": 0.0,
+          "TLimColdH": -2.0, "TLimColdL": -4.0, "TLimDew": 0.0, "PorEvaF": 0.5,
+          "WWearLim": 0.05, "WWetLim": 0.5, "DampWearF": 0.5, "MinWatmms": 0.001,
+          "MaxWatmms": 1.0, "MinSnowmms": 0.001, "MaxSnowmms": 200.0,
+          "MinIcemms": 0.001, "MaxIcemms": 100.0, "MinDepmms": 0.001,
+          "MaxDepmms": 2.0, "WatMHeat": 3.34e5, "WatDens": 1000.0,
+          "Snow2IceFac": SNOW2ICE, "forceSnowMelting": False, "forceIceMelting": False}
+    s = Surf(SrfSnow=0.5, TsurfAve=1.0, Q2Melt=1e5, WearSurf=False)
+    r = road_cond(s, wear_factors(s.SrfSnow, s.SrfIce, s.SrfIce2, s.SrfDep, s.SrfWat, 1.0),
+                  1.0, DT, cp)
+    assert "snow_over_melt" in r.diagnostics
+
+
 def test_road_cond_aggregates_ledger():
     """R2: road_cond returns a StorageResult whose ledger merges the sub-steps."""
     from droad.ledger import StorageResult
