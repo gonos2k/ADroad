@@ -88,7 +88,10 @@ def _as_finite_float(name: str, value) -> float:
     """Coerce to a finite Python float or raise LedgerError. Returns the value so
     the caller can NORMALIZE the field — every numeric field is stored as a plain
     float, so later `< 0` / arithmetic can't TypeError on a str/array/np/jax scalar.
-    Strings are rejected outright (an audit field must be numeric, not "1.0")."""
+    Strings and bools are rejected (a mass amount must be numeric, not "1.0" and
+    not True/False which would silently coerce to 1.0/0.0)."""
+    if _is_boolish(value):
+        raise LedgerError(f"{name} must be numeric, not bool: {value!r}")
     if isinstance(value, str):
         raise LedgerError(f"{name} must be a numeric scalar, not a string: {value!r}")
     try:
@@ -188,6 +191,9 @@ class StorageResult:
         # a bare string is a common mistake -> wrap it, not iterate its characters
         d = self.diagnostics
         diagnostics = (d,) if isinstance(d, str) else tuple(d)
+        for code in diagnostics:
+            if not isinstance(code, str):
+                raise LedgerError(f"diagnostic code must be str, got {code!r}")
         unknown = set(diagnostics) - DIAGNOSTIC_CODES
         if unknown:
             raise LedgerError(f"unknown diagnostic codes: {sorted(unknown, key=str)}")
@@ -252,9 +258,14 @@ def rollout_audit_to_dict(out: Mapping) -> dict:
     n = len(out["ledger"])
     if not (len(out["ledger_detail"]) == n == len(out["diagnostics"])):
         raise LedgerError("rollout audit lists have inconsistent lengths")
+    for lg in out["ledger"]:
+        if not isinstance(lg, StorageLedger):
+            raise LedgerError("ledger entries must be StorageLedger")
     for item in out["ledger_detail"]:
         if not (isinstance(item, tuple) and len(item) == 2):
             raise LedgerError("ledger_detail entries must be (prec_ledger, cond_ledger)")
+        if not all(isinstance(x, StorageLedger) for x in item):
+            raise LedgerError("ledger_detail entries must contain StorageLedger objects")
     return {
         "ledger": [ledger_to_dict(lg) for lg in out["ledger"]],
         "ledger_detail": [{"prec": ledger_to_dict(p), "cond": ledger_to_dict(c)}
@@ -284,6 +295,9 @@ def merge_ledgers(*ledgers: StorageLedger, atol: float = 1e-9) -> StorageLedger:
     """
     if not ledgers:
         raise LedgerError("merge_ledgers requires at least one ledger")
+    atol = _as_finite_float("merge_ledgers.atol", atol)   # NaN would skip the check
+    if atol < 0.0:
+        raise LedgerError("merge_ledgers.atol must be non-negative")
     for a, b in zip(ledgers, ledgers[1:]):
         if abs(a.primary_after_actual - b.primary_before) > atol:
             raise LedgerError(

@@ -233,6 +233,34 @@ def test_rollout_audit_rejects_bad_detail_entry():
         rollout_audit_to_dict({"ledger": [lg], "ledger_detail": [lg], "diagnostics": [()]})
 
 
+def test_bool_numeric_field_rejected():
+    with pytest.raises(LedgerError):                    # True would coerce to 1.0
+        _ledger(0.0, True, 0.0, 1.0)
+
+
+def test_merge_ledgers_rejects_bad_atol():
+    a = _ledger(0.0, 1.0, 0.0, 1.0)
+    b = _ledger(1.0, 0.0, 0.0, 1.0)
+    with pytest.raises(LedgerError):                    # NaN atol would skip continuity
+        merge_ledgers(a, b, atol=float("nan"))
+    with pytest.raises(LedgerError):
+        merge_ledgers(a, b, atol=-1.0)
+
+
+def test_rollout_audit_rejects_non_ledger_entries():
+    from droad.ledger import rollout_audit_to_dict
+    with pytest.raises(LedgerError):
+        rollout_audit_to_dict({"ledger": [object()], "ledger_detail": [(object(), object())],
+                               "diagnostics": [()]})
+
+
+def test_diagnostic_code_must_be_str():
+    from droad.ledger import StorageResult
+    lg = _ledger(1.0, 0.0, 0.0, 1.0)
+    with pytest.raises(LedgerError):
+        StorageResult(object(), lg, (123,))            # non-str diagnostic code
+
+
 def test_rollout_audit_to_dict_is_json_serializable():
     import json
     from droad.ledger import rollout_audit_to_dict, DIAG_SNOW_OVERFLOW

@@ -63,6 +63,12 @@ pytest -q                     →  전부 통과 (배치 권장: pytest -m "not 
 **fixture 도메인(no-coupling rollout) 내부**에서만 보장된다. 극단 비물리 입력에서
 reference(clip 없음)와 갈라질 수 있다 — exact parity는 정상 기상 범위 주장이다.
 
+## 코드 리뷰 반영 (9차: 타입 방어 마무리)
+`_as_finite_float`가 **bool**(numpy bool 포함)을 numeric field에서 거부 — `True`가 조용히 1.0으로
+coerce되는 것을 차단. `merge_ledgers`가 `atol`을 finite·non-negative 검증(NaN atol이 continuity check를
+우회하는 것 방지). `rollout_audit_to_dict`가 `ledger`/`ledger_detail` 항목이 실제 `StorageLedger`인지 검증.
+`StorageResult`가 diagnostic code가 str인지 검증.
+
 ## 코드 리뷰 반영 (8차: public helper 방어성 완성)
 `_require_finite`를 `_as_finite_float`로 바꿔 모든 numeric field를 **plain float로 정규화**(str/array/NaN/Inf
 거부) — 이후 `<0`·산술이 어떤 scalar 타입(numpy/jax/int)에서도 TypeError 없이 동작. `make_ledger`의
