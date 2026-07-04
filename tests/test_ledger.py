@@ -195,10 +195,42 @@ def test_non_scalar_field_rejected():
             primary_mass_residual=0.0, event_flags=ev)
 
 
+def test_string_number_field_rejected():
+    with pytest.raises(LedgerError):                    # "1.0" is a string, not numeric
+        _ledger("1.0", 0.0, 0.0, 1.0)
+
+
+def test_numeric_fields_normalized_to_float():
+    lg = _ledger(0, 2, 0, 2, internal_transfer={"water_to_ice": 1})   # ints in
+    assert type(lg.primary_before) is float
+    assert type(lg.external_source) is float
+    assert type(lg.internal_transfer["water_to_ice"]) is float
+
+
+def test_make_ledger_wraps_bad_arithmetic():
+    from droad.ledger import make_ledger
+    with pytest.raises(LedgerError):                    # array-like -> LedgerError, not TypeError
+        make_ledger(0.0, [1.0], 0.0, 0.0, _zero_transfer(), _zero_aux(), _no_events())
+
+
+def test_storage_result_accepts_bare_string_diagnostic():
+    from droad.ledger import StorageResult, DIAG_SNOW_OVERFLOW
+    lg = _ledger(1.0, 0.0, 0.0, 1.0)
+    r = StorageResult(object(), lg, DIAG_SNOW_OVERFLOW)   # bare string, not a tuple
+    assert r.diagnostics == (DIAG_SNOW_OVERFLOW,)         # wrapped, not char-split
+
+
 def test_rollout_audit_rejects_missing_keys():
     from droad.ledger import rollout_audit_to_dict
     with pytest.raises(LedgerError):
         rollout_audit_to_dict({"ledger": []})           # return_ledger=False shape
+
+
+def test_rollout_audit_rejects_bad_detail_entry():
+    from droad.ledger import rollout_audit_to_dict
+    lg = _ledger(0.0, 0.0, 0.0, 0.0)
+    with pytest.raises(LedgerError):                    # detail entry not a 2-tuple
+        rollout_audit_to_dict({"ledger": [lg], "ledger_detail": [lg], "diagnostics": [()]})
 
 
 def test_rollout_audit_to_dict_is_json_serializable():

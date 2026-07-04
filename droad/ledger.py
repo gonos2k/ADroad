@@ -84,16 +84,20 @@ def _is_boolish(v) -> bool:
             and cls.__name__ in ("bool_", "bool"))
 
 
-def _require_finite(name: str, value) -> None:
-    """Reject NaN/Inf — an audit record with non-finite mass is meaningless, and
-    NaN would slip past the < 0 / |.|>tol checks (all comparisons with NaN False).
-    Non-scalar input (array/list/object) is also rejected as a LedgerError."""
+def _as_finite_float(name: str, value) -> float:
+    """Coerce to a finite Python float or raise LedgerError. Returns the value so
+    the caller can NORMALIZE the field — every numeric field is stored as a plain
+    float, so later `< 0` / arithmetic can't TypeError on a str/array/np/jax scalar.
+    Strings are rejected outright (an audit field must be numeric, not "1.0")."""
+    if isinstance(value, str):
+        raise LedgerError(f"{name} must be a numeric scalar, not a string: {value!r}")
     try:
         v = float(value)
     except (TypeError, ValueError):
         raise LedgerError(f"{name} must be a finite scalar, got {value!r}") from None
     if not math.isfinite(v):
         raise LedgerError(f"{name} must be finite, got {value!r}")
+    return v
 
 
 _CONSISTENCY_TOL = 1e-9
@@ -116,15 +120,18 @@ class StorageLedger:
         _check_keys(self.auxiliary_update, AUXILIARY_UPDATE_KEYS, "auxiliary_update")
         _check_keys(self.event_flags, EVENT_FLAG_KEYS, "event_flags")
 
-        # finiteness: NaN/Inf would slip past every < 0 / |.|>tol check below
+        # finiteness + normalization: coerce every numeric field to a plain float
+        # (NaN/Inf/str/array rejected). Done first so all later comparisons are safe.
         for nm in ("primary_before", "external_source", "external_sink",
                    "primary_after_expected", "primary_after_actual",
                    "primary_mass_residual"):
-            _require_finite(nm, getattr(self, nm))
-        for k, v in self.internal_transfer.items():
-            _require_finite(f"internal_transfer[{k}]", v)
-        for k, v in self.auxiliary_update.items():
-            _require_finite(f"auxiliary_update[{k}]", v)
+            object.__setattr__(self, nm, _as_finite_float(nm, getattr(self, nm)))
+        it = {k: _as_finite_float(f"internal_transfer[{k}]", v)
+              for k, v in self.internal_transfer.items()}
+        aux = {k: _as_finite_float(f"auxiliary_update[{k}]", v)
+               for k, v in self.auxiliary_update.items()}
+        object.__setattr__(self, "internal_transfer", it)   # frozen at end
+        object.__setattr__(self, "auxiliary_update", aux)
 
         # event_flags must be genuine bools (merge_ledgers uses bool(...) — a
         # string "False" would be truthy and corrupt the aggregated flag)
@@ -178,7 +185,9 @@ class StorageResult:
     diagnostics: tuple = ()
 
     def __post_init__(self):
-        diagnostics = tuple(self.diagnostics)          # freeze (a list would be mutable)
+        # a bare string is a common mistake -> wrap it, not iterate its characters
+        d = self.diagnostics
+        diagnostics = (d,) if isinstance(d, str) else tuple(d)
         unknown = set(diagnostics) - DIAGNOSTIC_CODES
         if unknown:
             raise LedgerError(f"unknown diagnostic codes: {sorted(unknown, key=str)}")
@@ -190,7 +199,11 @@ def make_ledger(
     primary_after_actual, internal_transfer, auxiliary_update, event_flags,
 ) -> StorageLedger:
     """Build a ledger; residual is derived, never passed in."""
-    expected = primary_before + external_source - external_sink
+    try:                                    # guard the pre-construction arithmetic
+        expected = primary_before + external_source - external_sink
+        residual = primary_after_actual - expected
+    except (TypeError, ValueError):
+        raise LedgerError("ledger numeric fields must be finite scalars") from None
     return StorageLedger(
         primary_before=primary_before,
         external_source=external_source,
@@ -199,7 +212,7 @@ def make_ledger(
         auxiliary_update=dict(auxiliary_update),
         primary_after_expected=expected,
         primary_after_actual=primary_after_actual,
-        primary_mass_residual=primary_after_actual - expected,
+        primary_mass_residual=residual,
         event_flags=dict(event_flags),
     )
 
@@ -239,6 +252,9 @@ def rollout_audit_to_dict(out: Mapping) -> dict:
     n = len(out["ledger"])
     if not (len(out["ledger_detail"]) == n == len(out["diagnostics"])):
         raise LedgerError("rollout audit lists have inconsistent lengths")
+    for item in out["ledger_detail"]:
+        if not (isinstance(item, tuple) and len(item) == 2):
+            raise LedgerError("ledger_detail entries must be (prec_ledger, cond_ledger)")
     return {
         "ledger": [ledger_to_dict(lg) for lg in out["ledger"]],
         "ledger_detail": [{"prec": ledger_to_dict(p), "cond": ledger_to_dict(c)}

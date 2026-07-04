@@ -63,6 +63,12 @@ pytest -q                     →  전부 통과 (배치 권장: pytest -m "not 
 **fixture 도메인(no-coupling rollout) 내부**에서만 보장된다. 극단 비물리 입력에서
 reference(clip 없음)와 갈라질 수 있다 — exact parity는 정상 기상 범위 주장이다.
 
+## 코드 리뷰 반영 (8차: public helper 방어성 완성)
+`_require_finite`를 `_as_finite_float`로 바꿔 모든 numeric field를 **plain float로 정규화**(str/array/NaN/Inf
+거부) — 이후 `<0`·산술이 어떤 scalar 타입(numpy/jax/int)에서도 TypeError 없이 동작. `make_ledger`의
+선행 산술을 `LedgerError`로 래핑. `StorageResult`가 bare string diagnostic을 문자 분해 대신 `(str,)`로 래핑.
+`rollout_audit_to_dict`가 `ledger_detail` 각 항목이 2-tuple인지 검증. 모든 bad input이 일관되게 `LedgerError`.
+
 ## 코드 리뷰 반영 (7차: 감사 record 방어성 마무리)
 `StorageLedger`가 `event_flags` 값이 실제 bool인지 검증(numpy bool 허용·Python bool로 정규화 —
 문자열 "False"의 truthy 오염 차단)하고, `primary_before`/`primary_after_actual`의 **비음수**를 검증
