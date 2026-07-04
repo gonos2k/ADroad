@@ -63,6 +63,13 @@ pytest -q                     →  전부 통과 (배치 권장: pytest -m "not 
 **fixture 도메인(no-coupling rollout) 내부**에서만 보장된다. 극단 비물리 입력에서
 reference(clip 없음)와 갈라질 수 있다 — exact parity는 정상 기상 범위 주장이다.
 
+## 코드 리뷰 반영 (10차: merge fail-fast + 검증 helper 통합)
+`merge_ledgers`가 자식 ledger의 residual을 **fail-fast로 검사**(각 |residual|<=atol) — 이전엔 +0.5/-0.5
+자식 누출이 상쇄돼 aggregate가 깨끗해 보일 수 있었으나, 이제 개별 자식 누출이 즉시 `LedgerError`.
+diagnostics 검증을 `_normalize_diagnostics` 공유 helper로 통합(StorageResult·rollout_audit_to_dict 중복 제거),
+`rollout_audit_to_dict`가 step별 diagnostics code까지 registry 검증. `make_ledger`가 산술 전에 scalar를
+float로 정규화(모든 bad input → LedgerError).
+
 ## 코드 리뷰 반영 (9차: 타입 방어 마무리)
 `_as_finite_float`가 **bool**(numpy bool 포함)을 numeric field에서 거부 — `True`가 조용히 1.0으로
 coerce되는 것을 차단. `merge_ledgers`가 `atol`을 finite·non-negative 검증(NaN atol이 continuity check를

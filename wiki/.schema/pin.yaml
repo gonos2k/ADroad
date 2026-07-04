@@ -1,0 +1,5 @@
+pinned_version: 1
+pinned_at: 2026-07-04
+source: global
+source_version: 1
+notes: Initial bootstrap. Run /kg-schema pull-global to upgrade.

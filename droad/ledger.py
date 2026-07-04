@@ -1,8 +1,10 @@
 """Mass ledger contract for storage steps (P0 §3).
 
 State-mutating Surf steps (snow/ice/deposit_storage, road_cond) return a
-StorageResult(state_next, ledger); scalar helper steps (water_storage,
-precipitation_to_storage) return (value(s), ledger). The ledger separates
+StorageResult(state_next, ledger, diagnostics); scalar helper steps return
+value(s) plus ledger, and may additionally return diagnostics — e.g.
+precipitation_to_storage returns (SrfWat, SrfSnow, ledger) and water_storage
+returns (SrfWat, ledger, diagnostics). The ledger separates
 primary mass (water+snow+ice+deposit), auxiliary (ice2), and external
 source/sink so conservation is testable — not a single "total water" number.
 
@@ -61,6 +63,20 @@ EVENT_FLAG_KEYS = ("freeze_event", "melt_event", "snow_event", "deposit_melt_eve
 
 class LedgerError(ValueError):
     """Raised on missing/unknown ledger keys."""
+
+
+def _normalize_diagnostics(diagnostics) -> tuple:
+    """Normalize & validate a diagnostics collection (shared by StorageResult and
+    rollout_audit_to_dict): a bare string becomes a 1-tuple, every code must be a
+    registered string. Returns a tuple; raises LedgerError on anything invalid."""
+    d = (diagnostics,) if isinstance(diagnostics, str) else tuple(diagnostics)
+    for code in d:
+        if not isinstance(code, str):
+            raise LedgerError(f"diagnostic code must be str, got {code!r}")
+    unknown = set(d) - DIAGNOSTIC_CODES
+    if unknown:
+        raise LedgerError(f"unknown diagnostic codes: {sorted(unknown, key=str)}")
+    return d
 
 
 def _check_keys(d: Mapping[str, object], required: tuple[str, ...], name: str) -> None:
@@ -188,16 +204,7 @@ class StorageResult:
     diagnostics: tuple = ()
 
     def __post_init__(self):
-        # a bare string is a common mistake -> wrap it, not iterate its characters
-        d = self.diagnostics
-        diagnostics = (d,) if isinstance(d, str) else tuple(d)
-        for code in diagnostics:
-            if not isinstance(code, str):
-                raise LedgerError(f"diagnostic code must be str, got {code!r}")
-        unknown = set(diagnostics) - DIAGNOSTIC_CODES
-        if unknown:
-            raise LedgerError(f"unknown diagnostic codes: {sorted(unknown, key=str)}")
-        object.__setattr__(self, "diagnostics", diagnostics)
+        object.__setattr__(self, "diagnostics", _normalize_diagnostics(self.diagnostics))
 
 
 def make_ledger(
@@ -205,20 +212,22 @@ def make_ledger(
     primary_after_actual, internal_transfer, auxiliary_update, event_flags,
 ) -> StorageLedger:
     """Build a ledger; residual is derived, never passed in."""
-    try:                                    # guard the pre-construction arithmetic
-        expected = primary_before + external_source - external_sink
-        residual = primary_after_actual - expected
-    except (TypeError, ValueError):
-        raise LedgerError("ledger numeric fields must be finite scalars") from None
+    # normalize the scalars first so the pre-construction arithmetic can't raise a
+    # raw TypeError (bad input -> LedgerError, consistent with StorageLedger).
+    pb = _as_finite_float("primary_before", primary_before)
+    src = _as_finite_float("external_source", external_source)
+    sink = _as_finite_float("external_sink", external_sink)
+    actual = _as_finite_float("primary_after_actual", primary_after_actual)
+    expected = pb + src - sink
     return StorageLedger(
-        primary_before=primary_before,
-        external_source=external_source,
-        external_sink=external_sink,
+        primary_before=pb,
+        external_source=src,
+        external_sink=sink,
         internal_transfer=dict(internal_transfer),
         auxiliary_update=dict(auxiliary_update),
         primary_after_expected=expected,
-        primary_after_actual=primary_after_actual,
-        primary_mass_residual=residual,
+        primary_after_actual=actual,
+        primary_mass_residual=actual - expected,
         event_flags=dict(event_flags),
     )
 
@@ -266,11 +275,12 @@ def rollout_audit_to_dict(out: Mapping) -> dict:
             raise LedgerError("ledger_detail entries must be (prec_ledger, cond_ledger)")
         if not all(isinstance(x, StorageLedger) for x in item):
             raise LedgerError("ledger_detail entries must contain StorageLedger objects")
+    diagnostics = [list(_normalize_diagnostics(d)) for d in out["diagnostics"]]  # validate codes
     return {
         "ledger": [ledger_to_dict(lg) for lg in out["ledger"]],
         "ledger_detail": [{"prec": ledger_to_dict(p), "cond": ledger_to_dict(c)}
                           for p, c in out["ledger_detail"]],
-        "diagnostics": [list(d) for d in out["diagnostics"]],
+        "diagnostics": diagnostics,
     }
 
 
@@ -289,15 +299,21 @@ def merge_ledgers(*ledgers: StorageLedger, atol: float = 1e-9) -> StorageLedger:
     from the first `primary_before` and summed external flows, and take the
     actual from the LAST child (the final state after all sub-steps).
 
-    Continuity is enforced: each child's `primary_after_actual` must equal the
-    next child's `primary_before`, so a reordered or mis-recorded sub-step can't
-    pass silently.
+    Fail-fast on child leaks: every child must itself be balanced (|residual| <=
+    atol). Otherwise two children with opposite unaccounted mass (+0.5 / -0.5)
+    could telescope to a clean aggregate and hide the leak. Continuity is also
+    enforced: each child's `primary_after_actual` must equal the next child's
+    `primary_before`, so a reordered or mis-recorded sub-step can't pass silently.
     """
     if not ledgers:
         raise LedgerError("merge_ledgers requires at least one ledger")
     atol = _as_finite_float("merge_ledgers.atol", atol)   # NaN would skip the check
     if atol < 0.0:
         raise LedgerError("merge_ledgers.atol must be non-negative")
+    for i, lg in enumerate(ledgers):
+        if abs(lg.primary_mass_residual) > atol:
+            raise LedgerError(
+                f"child ledger {i} has non-zero residual: {lg.primary_mass_residual}")
     for a, b in zip(ledgers, ledgers[1:]):
         if abs(a.primary_after_actual - b.primary_before) > atol:
             raise LedgerError(

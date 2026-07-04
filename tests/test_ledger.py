@@ -76,12 +76,23 @@ def test_merge_recomputes_residual_not_sums():
     assert merged.internal_transfer["water_to_ice"] == 1.0
 
 
-def test_merge_detects_leak_via_actual_last_child():
-    # child B loses 0.5 mm that isn't accounted as external -> residual shows it
+def test_merge_rejects_leaky_child():
+    # child B loses 0.5 mm not accounted as external -> its own residual is -0.5.
+    # merge is fail-fast: a leaky child is rejected (it could otherwise telescope
+    # with an opposite leak and hide in a clean aggregate).
     a = _ledger(0.0, 2.0, 0.0, 2.0)
-    b = _ledger(2.0, 0.0, 0.0, 1.5)  # actual dropped, no external sink recorded
-    merged = merge_ledgers(a, b)
-    assert merged.primary_mass_residual == pytest.approx(-0.5)
+    b = _ledger(2.0, 0.0, 0.0, 1.5)
+    assert b.primary_mass_residual == pytest.approx(-0.5)
+    with pytest.raises(LedgerError):
+        merge_ledgers(a, b)
+
+
+def test_merge_rejects_cancelling_child_leaks():
+    # +0.5 then -0.5 leaks: aggregate would look clean, but each child is rejected.
+    a = _ledger(0.0, 0.0, 0.0, 0.5)   # created 0.5 from nothing (residual +0.5)
+    b = _ledger(0.5, 0.0, 0.0, 0.0)   # lost 0.5 (residual -0.5); contiguous
+    with pytest.raises(LedgerError):
+        merge_ledgers(a, b)
 
 
 def test_merge_event_flags_or():
@@ -259,6 +270,14 @@ def test_diagnostic_code_must_be_str():
     lg = _ledger(1.0, 0.0, 0.0, 1.0)
     with pytest.raises(LedgerError):
         StorageResult(object(), lg, (123,))            # non-str diagnostic code
+
+
+def test_rollout_audit_validates_diagnostic_codes():
+    from droad.ledger import rollout_audit_to_dict
+    lg = _ledger(0.0, 0.0, 0.0, 0.0)
+    with pytest.raises(LedgerError):                    # unknown diagnostic code per step
+        rollout_audit_to_dict({"ledger": [lg], "ledger_detail": [(lg, lg)],
+                               "diagnostics": [("not_a_real_code",)]})
 
 
 def test_rollout_audit_to_dict_is_json_serializable():
