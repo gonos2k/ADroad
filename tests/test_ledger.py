@@ -315,6 +315,25 @@ def test_merge_rejects_non_ledger_child():
         merge_ledgers(a, object())
 
 
+def test_make_ledger_non_mapping_transfer_rejected():
+    from droad.ledger import make_ledger
+    with pytest.raises(LedgerError):                    # None mapping -> LedgerError, not TypeError
+        make_ledger(0.0, 0.0, 0.0, 0.0, None, _zero_aux(), _no_events())
+
+
+def test_diagnostics_mapping_rejected():
+    from droad.ledger import StorageResult, DIAG_SNOW_OVERFLOW
+    lg = _ledger(1.0, 0.0, 0.0, 1.0)
+    with pytest.raises(LedgerError):                    # mapping would silently become its keys
+        StorageResult(object(), lg, {DIAG_SNOW_OVERFLOW: True})
+
+
+def test_rollout_audit_non_sized_entries_rejected():
+    from droad.ledger import rollout_audit_to_dict
+    with pytest.raises(LedgerError):                    # entries not sized sequences
+        rollout_audit_to_dict({"ledger": 5, "ledger_detail": 5, "diagnostics": 5})
+
+
 def test_rollout_audit_to_dict_is_json_serializable():
     import json
     from droad.ledger import rollout_audit_to_dict, DIAG_SNOW_OVERFLOW

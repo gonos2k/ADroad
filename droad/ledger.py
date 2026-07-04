@@ -72,6 +72,8 @@ def _normalize_diagnostics(diagnostics) -> tuple:
     registered string. Returns a tuple; raises LedgerError on anything invalid."""
     if diagnostics is None:
         raise LedgerError("diagnostics must be an iterable of codes (or a str), not None")
+    if isinstance(diagnostics, ABCMapping):     # a mapping would silently become its keys
+        raise LedgerError("diagnostics must be a str or iterable of codes, not a mapping")
     try:
         d = (diagnostics,) if isinstance(diagnostics, str) else tuple(diagnostics)
     except TypeError:
@@ -227,16 +229,19 @@ def make_ledger(
     sink = _as_finite_float("external_sink", external_sink)
     actual = _as_finite_float("primary_after_actual", primary_after_actual)
     expected = pb + src - sink
+    # Pass the mappings THROUGH (no dict() here): StorageLedger.__post_init__ runs
+    # _check_keys (which rejects non-mapping as LedgerError) and then freezes a
+    # copy — pre-converting here would raise a raw TypeError on e.g. None.
     return StorageLedger(
         primary_before=pb,
         external_source=src,
         external_sink=sink,
-        internal_transfer=dict(internal_transfer),
-        auxiliary_update=dict(auxiliary_update),
+        internal_transfer=internal_transfer,
+        auxiliary_update=auxiliary_update,
         primary_after_expected=expected,
         primary_after_actual=actual,
         primary_mass_residual=actual - expected,
-        event_flags=dict(event_flags),
+        event_flags=event_flags,
     )
 
 
@@ -274,8 +279,12 @@ def rollout_audit_to_dict(out: Mapping) -> dict:
     if missing:
         raise LedgerError(
             f"rollout audit keys missing (need return_ledger=True): {sorted(missing, key=str)}")
-    n = len(out["ledger"])
-    if not (len(out["ledger_detail"]) == n == len(out["diagnostics"])):
+    try:
+        n = len(out["ledger"])
+        lengths_ok = len(out["ledger_detail"]) == n == len(out["diagnostics"])
+    except TypeError:
+        raise LedgerError("rollout audit entries must be sized sequences") from None
+    if not lengths_ok:
         raise LedgerError("rollout audit lists have inconsistent lengths")
     for lg in out["ledger"]:
         if not isinstance(lg, StorageLedger):

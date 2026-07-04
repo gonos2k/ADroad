@@ -63,6 +63,11 @@ pytest -q                     →  전부 통과 (배치 권장: pytest -m "not 
 **fixture 도메인(no-coupling rollout) 내부**에서만 보장된다. 극단 비물리 입력에서
 reference(clip 없음)와 갈라질 수 있다 — exact parity는 정상 기상 범위 주장이다.
 
+## 코드 리뷰 반영 (12차: 방어 래핑 마무리)
+`make_ledger`가 mapping을 `dict()`로 미리 변환하지 않고 그대로 넘겨(None 등이 `_check_keys`의 `LedgerError`로
+귀결), `_normalize_diagnostics`가 mapping을 거부(key로 조용히 해석되는 것 방지), `rollout_audit_to_dict`가
+비-sized 항목의 `len()` TypeError를 `LedgerError`로 래핑. 회귀 테스트 3건 추가.
+
 ## 코드 리뷰 반영 (11차: public input 방어 래핑)
 비정상 public input을 raw Python 예외 대신 `LedgerError`로 일관 처리: `_normalize_diagnostics`가
 None/비이터러블 거부, `_check_keys`가 non-mapping 거부(collections.abc.Mapping), `rollout_audit_to_dict`가
