@@ -63,6 +63,13 @@ pytest -q                     →  전부 통과 (배치 권장: pytest -m "not 
 **fixture 도메인(no-coupling rollout) 내부**에서만 보장된다. 극단 비물리 입력에서
 reference(clip 없음)와 갈라질 수 있다 — exact parity는 정상 기상 범위 주장이다.
 
+## 코드 리뷰 반영 (5차: 진단 polish)
+`diagnostics`를 registry화 — `DIAGNOSTIC_CODES` + 상수(`DIAG_*`)로 정의하고 `StorageResult.__post_init__`가
+미등록 코드를 `LedgerError`로 거부(transfer key와 동일한 엄격도). storage 분기는 literal 대신 상수 사용.
+`water_storage`도 hard-projection hit(`water_overflow`/`water_negative_pre_clamp`)을 진단으로 반환(3-tuple),
+`road_cond`가 water reclamp 진단까지 집계. `storage_result_to_dict()` 직렬화(ledger+diagnostics) 추가.
+`full_rollout(return_ledger=True)`의 shape/key/length/step residual을 직접 고정하는 테스트 추가.
+
 ## 코드 리뷰 반영 (4차: diagnostic richness)
 residual(=코드 누출 탐지)과 **분리된** 물리 feasibility 진단을 `StorageResult.diagnostics`에
 추가: over-melt(available 초과 융해), negative-pre-clamp, overflow(hard-projection hit).

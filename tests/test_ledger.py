@@ -139,3 +139,21 @@ def test_ledger_to_dict_is_json_serializable():
     json.dumps(d)                          # must not raise (plain dicts, not proxies)
     d["internal_transfer"]["water_to_ice"] = 999.0   # mutating the copy is fine
     assert lg.internal_transfer["water_to_ice"] == 1.0   # original untouched
+
+
+def test_storage_result_rejects_unknown_diagnostic():
+    from droad.ledger import StorageResult, DIAG_SNOW_OVERFLOW
+    lg = _ledger(1.0, 0.0, 0.0, 1.0)
+    StorageResult(object(), lg, (DIAG_SNOW_OVERFLOW,))       # known code ok
+    with pytest.raises(LedgerError):
+        StorageResult(object(), lg, ("snow_overflowwww",))  # typo rejected
+
+
+def test_storage_result_to_dict_is_json_serializable():
+    import json
+    from droad.ledger import StorageResult, storage_result_to_dict, DIAG_ICE_OVER_MELT
+    lg = _ledger(1.0, 0.0, 0.0, 1.0)
+    d = storage_result_to_dict(StorageResult(object(), lg, (DIAG_ICE_OVER_MELT,)))
+    assert d["diagnostics"] == ["ice_over_melt"]
+    assert d["ledger"]["primary_after_actual"] == 1.0
+    json.dumps(d)                          # state_next omitted -> serializable

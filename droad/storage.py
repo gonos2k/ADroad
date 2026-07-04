@@ -15,6 +15,10 @@ from dataclasses import dataclass, replace
 
 from .branches import guarded_exp
 from .ledger import (
+    DIAG_DEPOSIT_NEGATIVE_PRE_CLAMP, DIAG_DEPOSIT_OVERFLOW,
+    DIAG_ICE_NEGATIVE_PRE_CLAMP, DIAG_ICE_OVERFLOW, DIAG_ICE_OVER_MELT,
+    DIAG_SNOW_NEGATIVE_PRE_CLAMP, DIAG_SNOW_OVERFLOW, DIAG_SNOW_OVER_MELT,
+    DIAG_WATER_NEGATIVE_PRE_CLAMP, DIAG_WATER_OVERFLOW,
     INTERNAL_TRANSFER_KEYS, LedgerError, StorageResult, make_ledger,
 )
 
@@ -160,11 +164,15 @@ def wear_factors(SrfSnow, SrfIce, SrfIce2, SrfDep, SrfWat, Tph) -> WearFactors:
 def water_storage(SrfWat, SrfSnow, SrfIce, SrfDep, TsurfAve, EvapmmTS,
                   WearSurf, WatWear, MaxPormms, cp):
     """Water storage update: evaporation/condensation, traffic wear, limits.
-    Mirrors Storage.WaterStorage. Returns (SrfWat_new, ledger).
+    Mirrors Storage.WaterStorage. Returns (SrfWat_new, ledger, diagnostics).
+    All ops are external (evap/cond/wear/clamp), no internal phase transfer, so
+    the ledger's net-delta external accounting is exact here. diagnostics flag the
+    hard-projection hits for consistency with the phase steps.
     cp keys: TLimDew, PorEvaF, WWearLim, WWetLim, DampWearF, MinWatmms, MaxWatmms.
     """
     before = SrfWat
     w = SrfWat
+    diag = []
 
     # evaporation / condensation — only on bare, warm surface
     if SrfSnow <= 0.0 and SrfIce <= 0.0 and SrfDep <= 0.0 and TsurfAve > cp["TLimDew"]:
@@ -181,6 +189,10 @@ def water_storage(SrfWat, SrfSnow, SrfIce, SrfDep, TsurfAve, EvapmmTS,
         else:
             w -= cp["DampWearF"] * ww
 
+    if w < 0.0:
+        diag.append(DIAG_WATER_NEGATIVE_PRE_CLAMP)
+    if w > cp["MaxWatmms"]:
+        diag.append(DIAG_WATER_OVERFLOW)
     if w < cp["MinWatmms"]:
         w = 0.0
     if w > cp["MaxWatmms"]:
@@ -197,7 +209,7 @@ def water_storage(SrfWat, SrfSnow, SrfIce, SrfDep, TsurfAve, EvapmmTS,
         event_flags={"freeze_event": False, "melt_event": False,
                      "snow_event": False, "deposit_melt_event": False},
     )
-    return w, ledger
+    return w, ledger, tuple(diag)
 
 
 def snow_storage(s: Surf, wearF, MaxPormms, DTSecs, cp) -> StorageResult:
@@ -239,7 +251,7 @@ def snow_storage(s: Surf, wearF, MaxPormms, DTSecs, cp) -> StorageResult:
         elif s.Q2Melt > 0.0 and s.TsurfAve >= cp["TLimMeltSnow"]:
             amt = 1000.0 * (s.Q2Melt * DTSecs) / (cp["WatMHeat"] * cp["WatDens"])
             if amt > snow:                          # energy-unlimited (reference quirk)
-                diag.append("snow_over_melt")
+                diag.append(DIAG_SNOW_OVER_MELT)
             tr["snow_to_water"] = tr.get("snow_to_water", 0.0) + amt
             melt_event = True
             snow -= amt
@@ -274,9 +286,9 @@ def snow_storage(s: Surf, wearF, MaxPormms, DTSecs, cp) -> StorageResult:
 
     old = snow                           # Min/Max clamp (export or, if negative, import)
     if old < 0.0:
-        diag.append("snow_negative_pre_clamp")
+        diag.append(DIAG_SNOW_NEGATIVE_PRE_CLAMP)
     if old > cp["MaxSnowmms"]:
-        diag.append("snow_overflow")
+        diag.append(DIAG_SNOW_OVERFLOW)
     if snow < cp["MinSnowmms"]:
         snow = 0.0
     if snow > cp["MaxSnowmms"]:
@@ -323,7 +335,7 @@ def ice_storage(s: Surf, wearF, DTSecs, cp) -> StorageResult:
         elif s.Q2Melt > 0.0 and s.TsurfAve >= cp["TLimMeltIce"]:
             amt = 1000.0 * (s.Q2Melt * DTSecs) / (cp["WatMHeat"] * cp["WatDens"])
             if amt > ice:                           # energy-unlimited (reference quirk)
-                diag.append("ice_over_melt")
+                diag.append(DIAG_ICE_OVER_MELT)
             tr["ice_to_water"] = tr.get("ice_to_water", 0.0) + amt
             melt_event = True
             ice -= amt
@@ -337,9 +349,9 @@ def ice_storage(s: Surf, wearF, DTSecs, cp) -> StorageResult:
 
     old = ice                                            # ice Min/Max clamp (export or import)
     if old < 0.0:
-        diag.append("ice_negative_pre_clamp")
+        diag.append(DIAG_ICE_NEGATIVE_PRE_CLAMP)
     if old > cp["MaxIcemms"]:
-        diag.append("ice_overflow")
+        diag.append(DIAG_ICE_OVERFLOW)
     if ice < cp["MinIcemms"]:
         ice = 0.0
     if ice > cp["MaxIcemms"]:
@@ -381,7 +393,7 @@ def deposit_storage(s: Surf, DepWear, cp) -> StorageResult:
         old = dep; dep -= DepWear; ext_sink += old - dep
     old = dep                            # min-clamp (export or, if negative, import)
     if old < 0.0:
-        diag.append("deposit_negative_pre_clamp")
+        diag.append(DIAG_DEPOSIT_NEGATIVE_PRE_CLAMP)
     if dep < cp["MinDepmms"]:
         dep = 0.0
     if dep < old:
@@ -389,7 +401,7 @@ def deposit_storage(s: Surf, DepWear, cp) -> StorageResult:
     elif dep > old:
         ext_src += dep - old
     if dep > cp["MaxDepmms"]:            # overflow -> water (internal transfer)
-        diag.append("deposit_overflow")
+        diag.append(DIAG_DEPOSIT_OVERFLOW)
         tr["deposit_to_water"] = tr.get("deposit_to_water", 0.0) + (dep - cp["MaxDepmms"])
         wat += dep - cp["MaxDepmms"]
         dep = cp["MaxDepmms"]

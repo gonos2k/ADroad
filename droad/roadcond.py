@@ -11,7 +11,10 @@ from __future__ import annotations
 
 from dataclasses import replace
 
-from .ledger import INTERNAL_TRANSFER_KEYS, StorageResult, make_ledger, merge_ledgers
+from .ledger import (
+    DIAG_WATER_NEGATIVE_PRE_CLAMP, DIAG_WATER_OVERFLOW,
+    INTERNAL_TRANSFER_KEYS, StorageResult, make_ledger, merge_ledgers,
+)
 from .storage import (
     water_storage, snow_storage, ice_storage, deposit_storage, new_melt_freeze_heat,
 )
@@ -46,17 +49,21 @@ def road_cond(s, wf, MaxPormms, DTSecs, cp) -> StorageResult:
         vc = True
     s = replace(s, VeryCold=vc)
 
-    w, lw = water_storage(s.SrfWat, s.SrfSnow, s.SrfIce, s.SrfDep, s.TsurfAve,
-                          s.EvapmmTS, s.WearSurf, wf.WatWear, MaxPormms, cp)
+    w, lw, wdiag = water_storage(s.SrfWat, s.SrfSnow, s.SrfIce, s.SrfDep, s.TsurfAve,
+                                 s.EvapmmTS, s.WearSurf, wf.WatWear, MaxPormms, cp)
     s = replace(s, SrfWat=w)
 
     rs = snow_storage(s, wf, MaxPormms, DTSecs, cp); s = rs.state_next
     ri = ice_storage(s, wf, DTSecs, cp); s = ri.state_next
     rd = deposit_storage(s, wf.DepWear, cp); s = rd.state_next
-    diagnostics = rs.diagnostics + ri.diagnostics + rd.diagnostics
+    diagnostics = wdiag + rs.diagnostics + ri.diagnostics + rd.diagnostics
 
     before_clamp = _prim(s)                          # water limits re-check
     w = s.SrfWat
+    if w < 0.0:
+        diagnostics = diagnostics + (DIAG_WATER_NEGATIVE_PRE_CLAMP,)
+    if w > cp["MaxWatmms"]:
+        diagnostics = diagnostics + (DIAG_WATER_OVERFLOW,)
     if w < cp["MinWatmms"]:
         w = 0.0
     if w > cp["MaxWatmms"]:

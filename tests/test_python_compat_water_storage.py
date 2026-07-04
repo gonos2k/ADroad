@@ -85,7 +85,7 @@ def test_water_storage_matches_reference(ref, c):
                            WearSurf=wear)
     m["Storage"].WaterStorage(MaxPor, watwear, surf, cp)   # mutates surf.SrfWatmms
 
-    w, lg = water_storage(SrfWat, SrfSnow, SrfIce, SrfDep, Tsurf, Evap,
-                          wear, watwear, MaxPor, _cp_dict(cp))
+    w, lg, _ = water_storage(SrfWat, SrfSnow, SrfIce, SrfDep, Tsurf, Evap,
+                             wear, watwear, MaxPor, _cp_dict(cp))
     assert w == pytest.approx(surf.SrfWatmms, abs=1e-12), f"case {c}"
     assert lg.primary_mass_residual == pytest.approx(0.0, abs=1e-12)

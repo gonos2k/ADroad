@@ -35,6 +35,25 @@ INTERNAL_TRANSFER_KEYS = (
     "water_to_ice", "ice_to_water", "snow_to_water", "snow_to_ice",
     "deposit_to_water", "deposit_to_ice",
 )
+
+# Feasibility diagnostics (physics/numerical flags, SEPARATE from mass accounting).
+# Registered like transfer keys so a typo raises instead of silently passing.
+DIAG_SNOW_OVER_MELT = "snow_over_melt"
+DIAG_SNOW_NEGATIVE_PRE_CLAMP = "snow_negative_pre_clamp"
+DIAG_SNOW_OVERFLOW = "snow_overflow"
+DIAG_ICE_OVER_MELT = "ice_over_melt"
+DIAG_ICE_NEGATIVE_PRE_CLAMP = "ice_negative_pre_clamp"
+DIAG_ICE_OVERFLOW = "ice_overflow"
+DIAG_DEPOSIT_NEGATIVE_PRE_CLAMP = "deposit_negative_pre_clamp"
+DIAG_DEPOSIT_OVERFLOW = "deposit_overflow"
+DIAG_WATER_NEGATIVE_PRE_CLAMP = "water_negative_pre_clamp"
+DIAG_WATER_OVERFLOW = "water_overflow"
+DIAGNOSTIC_CODES = frozenset({
+    DIAG_SNOW_OVER_MELT, DIAG_SNOW_NEGATIVE_PRE_CLAMP, DIAG_SNOW_OVERFLOW,
+    DIAG_ICE_OVER_MELT, DIAG_ICE_NEGATIVE_PRE_CLAMP, DIAG_ICE_OVERFLOW,
+    DIAG_DEPOSIT_NEGATIVE_PRE_CLAMP, DIAG_DEPOSIT_OVERFLOW,
+    DIAG_WATER_NEGATIVE_PRE_CLAMP, DIAG_WATER_OVERFLOW,
+})
 AUXILIARY_UPDATE_KEYS = ("ice2_increase", "ice2_decrease", "ice2_reset")
 EVENT_FLAG_KEYS = ("freeze_event", "melt_event", "snow_event", "deposit_melt_event")
 
@@ -109,6 +128,11 @@ class StorageResult:
     # are mass-conserving but relevant to the deviation budget. Never affects mass.
     diagnostics: tuple = ()
 
+    def __post_init__(self):
+        unknown = set(self.diagnostics) - DIAGNOSTIC_CODES
+        if unknown:
+            raise LedgerError(f"unknown diagnostic codes: {sorted(unknown)}")
+
 
 def make_ledger(
     primary_before, external_source, external_sink,
@@ -146,6 +170,12 @@ def ledger_to_dict(lg: StorageLedger) -> dict:
         "primary_mass_residual": lg.primary_mass_residual,
         "event_flags": dict(lg.event_flags),
     }
+
+
+def storage_result_to_dict(r: StorageResult) -> dict:
+    """JSON/logging view of a StorageResult: its ledger plus the diagnostics
+    (state_next is omitted — it's the model state, not part of the audit record)."""
+    return {"ledger": ledger_to_dict(r.ledger), "diagnostics": list(r.diagnostics)}
 
 
 def _sum_by_keys(ledgers, attr, keys):

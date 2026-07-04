@@ -271,6 +271,17 @@ def test_overflow_diagnostics():
     assert "deposit_overflow" in rd.diagnostics
 
 
+def test_water_clamp_diagnostics():
+    """water_storage flags hard-projection hits (overflow) as diagnostics."""
+    from droad.storage import water_storage
+    cp = {"TLimDew": 0.0, "PorEvaF": 0.5, "WWearLim": 0.05, "WWetLim": 0.5,
+          "DampWearF": 0.5, "MinWatmms": 0.001, "MaxWatmms": 1.0}
+    w, lg, diag = water_storage(5.0, 0.0, 0.0, 0.0, -1.0, 0.0, False, 0.06, 0.5, cp)
+    assert "water_overflow" in diag
+    assert w == pytest.approx(1.0)               # clamped to MaxWatmms
+    assert abs(lg.primary_mass_residual) < 1e-12  # clamp export booked as external
+
+
 def test_road_cond_surfaces_diagnostics():
     """road_cond aggregates child diagnostics into its StorageResult."""
     from droad.storage import Surf, wear_factors

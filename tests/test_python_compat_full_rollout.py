@@ -92,3 +92,41 @@ def test_full_rollout_matches_reference():
     assert tsurf_rmse <= 1e-2, f"Tsurf RMSE={tsurf_rmse:.3e}"
     assert snow_mae <= 1e-3 and water_mae <= 1e-3 and ice_mae <= 1e-3, \
         f"storage MAE snow={snow_mae:.3e} water={water_mae:.3e} ice={ice_mae:.3e}"
+
+
+def test_full_rollout_return_ledger_shape():
+    """return_ledger=True yields a per-step audit: merged step_ledger, detail, and
+    diagnostics, each of length n_steps; every step's residual is ~0."""
+    from droad.ledger import StorageLedger
+    sys.path.insert(0, str(RSP_SRC))
+    m, objs = build_model()
+    mi, mo, phy, g, s, a, coup, st, cpm, _ = objs
+    n = 300
+    hours = np.array([t.hour for t in mi.time[:n]], float)
+    prec_in = np.array(mi.prec, float) / 3600.0 * st.DTSecs
+    surf0 = Surf(SrfWat=s.SrfWatmms, SrfSnow=s.SrfSnowmms, SrfIce=s.SrfIcemms,
+                 SrfIce2=s.SrfIce2mms, SrfDep=s.SrfDepmms, TsurfAve=s.TsurfAve,
+                 Q2Melt=s.Q2Melt, T4Melt=s.T4Melt, WearSurf=s.WearSurf,
+                 SnowType=a.SnowType, WetSnowFrozen=cpm.WetSnowFrozen, VeryCold=s.VeryCold)
+
+    got = full_rollout(
+        Tair=np.array(mi.Tair, float), VZ=np.array(mi.VZ, float), Rhz=np.array(mi.Rhz, float),
+        SW=np.array(mi.SW, float), LW=np.array(mi.LW, float),
+        TSurfObs=np.array(mi.TSurfObs, float), hours=hours,
+        prec_phase=np.array(mi.PrecPhase, float), prec_in_tstep=prec_in,
+        Tmp0=g.Tmp, TmpNw0=g.TmpNw, WCont=np.array(g.WCont, float),
+        CC=np.array(g.CC, float), ZDpth=np.array(g.ZDpth, float),
+        DyK=np.array(g.DyK, float), DyC=np.array(g.DyC, float),
+        surf0=surf0, Albedo0=g.Albedo, BLCond0=a.BLCond,
+        NLayers=st.NLayers, DTSecs=st.DTSecs, MaxPormms=phy.MaxPormms, Tph=st.Tph,
+        InitLenI=st.InitLenI, phy=_phy(phy), day=_day(st), cp=_cp(cpm), n_steps=n,
+        TsurfObsLast=coup.LastTsurfObs, return_ledger=True)
+
+    assert {"ledger", "ledger_detail", "diagnostics"} <= set(got)
+    assert len(got["ledger"]) == n
+    assert len(got["ledger_detail"]) == n
+    assert len(got["diagnostics"]) == n
+    assert isinstance(got["ledger"][0], StorageLedger)          # merged step ledger
+    assert len(got["ledger_detail"][0]) == 2                    # (prec, cond)
+    # every full step is mass-consistent (merged residual ~0)
+    assert max(abs(lg.primary_mass_residual) for lg in got["ledger"]) < 1e-9
