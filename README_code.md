@@ -63,6 +63,13 @@ pytest -q                     →  전부 통과 (배치 권장: pytest -m "not 
 **fixture 도메인(no-coupling rollout) 내부**에서만 보장된다. 극단 비물리 입력에서
 reference(clip 없음)와 갈라질 수 있다 — exact parity는 정상 기상 범위 주장이다.
 
+## 코드 리뷰 반영 (6차: finite 검증 + 불변화 마무리)
+`StorageLedger.__post_init__`가 모든 numeric scalar(primary/external/transfer/aux)에 **finite 검증**
+(`math.isfinite`)을 추가 — NaN/Inf는 `<0`·`|·|>tol` 비교를 통과하므로 감사 레이어에서 명시적으로 거부.
+`StorageResult`가 `diagnostics`를 tuple로 정규화·freeze(list 전달도 불변). `rollout_audit_to_dict()`로
+full_rollout 감사 trail 전체를 JSON화. 테스트는 `DIAG_*` 상수 사용으로 전환(문자열 값 계약은 직렬화
+테스트에서 고정).
+
 ## 코드 리뷰 반영 (5차: 진단 polish)
 `diagnostics`를 registry화 — `DIAGNOSTIC_CODES` + 상수(`DIAG_*`)로 정의하고 `StorageResult.__post_init__`가
 미등록 코드를 `LedgerError`로 거부(transfer key와 동일한 엄격도). storage 분기는 literal 대신 상수 사용.

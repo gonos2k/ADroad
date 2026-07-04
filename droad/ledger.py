@@ -25,6 +25,7 @@ whether such reference behavior is *physically* desirable is a separate concern
 
 from __future__ import annotations
 
+import math
 from dataclasses import dataclass
 from types import MappingProxyType
 from typing import Mapping
@@ -72,6 +73,13 @@ def _check_keys(d: Mapping[str, object], required: tuple[str, ...], name: str) -
         raise LedgerError(f"{name} has unknown keys: {sorted(unknown)}")
 
 
+def _require_finite(name: str, value) -> None:
+    """Reject NaN/Inf — an audit record with non-finite mass is meaningless, and
+    NaN would slip past the < 0 / |.|>tol checks (all comparisons with NaN False)."""
+    if not math.isfinite(float(value)):
+        raise LedgerError(f"{name} must be finite, got {value!r}")
+
+
 _CONSISTENCY_TOL = 1e-9
 
 
@@ -91,6 +99,16 @@ class StorageLedger:
         _check_keys(self.internal_transfer, INTERNAL_TRANSFER_KEYS, "internal_transfer")
         _check_keys(self.auxiliary_update, AUXILIARY_UPDATE_KEYS, "auxiliary_update")
         _check_keys(self.event_flags, EVENT_FLAG_KEYS, "event_flags")
+
+        # finiteness: NaN/Inf would slip past every < 0 / |.|>tol check below
+        for nm in ("primary_before", "external_source", "external_sink",
+                   "primary_after_expected", "primary_after_actual",
+                   "primary_mass_residual"):
+            _require_finite(nm, getattr(self, nm))
+        for k, v in self.internal_transfer.items():
+            _require_finite(f"internal_transfer[{k}]", v)
+        for k, v in self.auxiliary_update.items():
+            _require_finite(f"auxiliary_update[{k}]", v)
 
         # non-negativity: source/sink and every transfer/aux amount are magnitudes
         if self.external_source < 0.0 or self.external_sink < 0.0:
@@ -129,9 +147,11 @@ class StorageResult:
     diagnostics: tuple = ()
 
     def __post_init__(self):
-        unknown = set(self.diagnostics) - DIAGNOSTIC_CODES
+        diagnostics = tuple(self.diagnostics)          # freeze (a list would be mutable)
+        unknown = set(diagnostics) - DIAGNOSTIC_CODES
         if unknown:
             raise LedgerError(f"unknown diagnostic codes: {sorted(unknown)}")
+        object.__setattr__(self, "diagnostics", diagnostics)
 
 
 def make_ledger(
@@ -176,6 +196,17 @@ def storage_result_to_dict(r: StorageResult) -> dict:
     """JSON/logging view of a StorageResult: its ledger plus the diagnostics
     (state_next is omitted — it's the model state, not part of the audit record)."""
     return {"ledger": ledger_to_dict(r.ledger), "diagnostics": list(r.diagnostics)}
+
+
+def rollout_audit_to_dict(out: Mapping) -> dict:
+    """JSON/logging view of a full_rollout(return_ledger=True) audit trail:
+    per-step merged ledger, (prec, cond) detail, and diagnostics."""
+    return {
+        "ledger": [ledger_to_dict(lg) for lg in out["ledger"]],
+        "ledger_detail": [{"prec": ledger_to_dict(p), "cond": ledger_to_dict(c)}
+                          for p, c in out["ledger_detail"]],
+        "diagnostics": [list(d) for d in out["diagnostics"]],
+    }
 
 
 def _sum_by_keys(ledgers, attr, keys):

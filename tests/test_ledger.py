@@ -157,3 +157,31 @@ def test_storage_result_to_dict_is_json_serializable():
     assert d["diagnostics"] == ["ice_over_melt"]
     assert d["ledger"]["primary_after_actual"] == 1.0
     json.dumps(d)                          # state_next omitted -> serializable
+
+
+def test_ledger_rejects_nan_inf():
+    for bad in (float("nan"), float("inf")):
+        with pytest.raises(LedgerError):
+            _ledger(0.0, bad, 0.0, bad)                 # non-finite external_source/actual
+    with pytest.raises(LedgerError):                    # non-finite transfer amount
+        _ledger(0.0, 0.0, 0.0, 0.0, internal_transfer={"water_to_ice": float("nan")})
+
+
+def test_storage_result_diagnostics_frozen_to_tuple():
+    from droad.ledger import StorageResult, DIAG_SNOW_OVERFLOW
+    lg = _ledger(1.0, 0.0, 0.0, 1.0)
+    r = StorageResult(object(), lg, [DIAG_SNOW_OVERFLOW])   # pass a list
+    assert isinstance(r.diagnostics, tuple)                 # normalized/frozen
+    assert r.diagnostics == (DIAG_SNOW_OVERFLOW,)
+
+
+def test_rollout_audit_to_dict_is_json_serializable():
+    import json
+    from droad.ledger import rollout_audit_to_dict, DIAG_SNOW_OVERFLOW
+    lg = _ledger(0.0, 1.0, 0.0, 1.0)
+    out = {"ledger": [lg], "ledger_detail": [(lg, lg)],
+           "diagnostics": [(DIAG_SNOW_OVERFLOW,)]}
+    d = rollout_audit_to_dict(out)
+    assert len(d["ledger"]) == 1 and d["ledger_detail"][0]["cond"]["external_source"] == 1.0
+    assert d["diagnostics"] == [["snow_overflow"]]
+    json.dumps(d)

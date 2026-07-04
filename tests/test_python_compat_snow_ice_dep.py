@@ -249,35 +249,39 @@ def test_over_melt_diagnostics_but_residual_zero():
     """Energy-unlimited melt (amt > available) is flagged in diagnostics, yet the
     mass ledger residual stays ~0 (the clamp import is booked as external)."""
     from droad.storage import Surf, snow_storage, ice_storage
+    from droad.ledger import (DIAG_SNOW_OVER_MELT, DIAG_SNOW_NEGATIVE_PRE_CLAMP,
+                              DIAG_ICE_OVER_MELT)
     cp = _cp_synthetic()
     rs = snow_storage(Surf(SrfSnow=0.5, TsurfAve=1.0, Q2Melt=1e5, WearSurf=False),
                       _wearF(), 1.0, DT, cp)
-    assert "snow_over_melt" in rs.diagnostics
-    assert "snow_negative_pre_clamp" in rs.diagnostics
+    assert DIAG_SNOW_OVER_MELT in rs.diagnostics
+    assert DIAG_SNOW_NEGATIVE_PRE_CLAMP in rs.diagnostics
     assert abs(rs.ledger.primary_mass_residual) < 1e-9
 
     ri = ice_storage(Surf(SrfIce=0.5, SrfIce2=0.5, SrfSnow=0.0, TsurfAve=1.0, Q2Melt=1e5),
                      _wearF(), DT, cp)
-    assert "ice_over_melt" in ri.diagnostics
+    assert DIAG_ICE_OVER_MELT in ri.diagnostics
     assert abs(ri.ledger.primary_mass_residual) < 1e-9
 
 
 def test_overflow_diagnostics():
     from droad.storage import Surf, snow_storage, deposit_storage
+    from droad.ledger import DIAG_SNOW_OVERFLOW, DIAG_DEPOSIT_OVERFLOW
     cp = _cp_synthetic()
     rs = snow_storage(Surf(SrfSnow=300.0, TsurfAve=-5.0, WearSurf=False), _wearF(), 1.0, DT, cp)
-    assert "snow_overflow" in rs.diagnostics
+    assert DIAG_SNOW_OVERFLOW in rs.diagnostics
     rd = deposit_storage(Surf(SrfDep=5.0, TsurfAve=-1.0, WearSurf=False), _wearF().DepWear, cp)
-    assert "deposit_overflow" in rd.diagnostics
+    assert DIAG_DEPOSIT_OVERFLOW in rd.diagnostics
 
 
 def test_water_clamp_diagnostics():
     """water_storage flags hard-projection hits (overflow) as diagnostics."""
     from droad.storage import water_storage
+    from droad.ledger import DIAG_WATER_OVERFLOW
     cp = {"TLimDew": 0.0, "PorEvaF": 0.5, "WWearLim": 0.05, "WWetLim": 0.5,
           "DampWearF": 0.5, "MinWatmms": 0.001, "MaxWatmms": 1.0}
     w, lg, diag = water_storage(5.0, 0.0, 0.0, 0.0, -1.0, 0.0, False, 0.06, 0.5, cp)
-    assert "water_overflow" in diag
+    assert DIAG_WATER_OVERFLOW in diag
     assert w == pytest.approx(1.0)               # clamped to MaxWatmms
     assert abs(lg.primary_mass_residual) < 1e-12  # clamp export booked as external
 
@@ -294,10 +298,11 @@ def test_road_cond_surfaces_diagnostics():
           "MinIcemms": 0.001, "MaxIcemms": 100.0, "MinDepmms": 0.001,
           "MaxDepmms": 2.0, "WatMHeat": 3.34e5, "WatDens": 1000.0,
           "Snow2IceFac": SNOW2ICE, "forceSnowMelting": False, "forceIceMelting": False}
+    from droad.ledger import DIAG_SNOW_OVER_MELT
     s = Surf(SrfSnow=0.5, TsurfAve=1.0, Q2Melt=1e5, WearSurf=False)
     r = road_cond(s, wear_factors(s.SrfSnow, s.SrfIce, s.SrfIce2, s.SrfDep, s.SrfWat, 1.0),
                   1.0, DT, cp)
-    assert "snow_over_melt" in r.diagnostics
+    assert DIAG_SNOW_OVER_MELT in r.diagnostics
 
 
 def test_road_cond_aggregates_ledger():
