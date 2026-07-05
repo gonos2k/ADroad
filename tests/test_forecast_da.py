@@ -68,10 +68,13 @@ def test_multi_summarize_reportonly_when_not_all_beat():
     assert verdict == "REPORT_ONLY" and any("every window" in r for r in reasons)
 
 
-def test_multi_summarize_promote_when_all_beat_enough_cases():
+def test_multi_summarize_single_fixture_stays_reportonly_even_if_all_beat():
+    # windows of ONE fixture are not independent cases -> promotion uses n_cases=1,
+    # so even a clean 3/3 window sweep stays REPORT_ONLY (conservative philosophy).
     from tools.report_forecast_da_multi import summarize
-    rows, all_beat, (verdict, _r) = summarize([_res(k, 0.4, 0.5, True) for k in (1500, 2100, 2700)])
-    assert all_beat is True and verdict == "PROMOTE"
+    rows, all_beat, (verdict, reasons) = summarize([_res(k, 0.4, 0.5, True) for k in (1500, 2100, 2700)])
+    assert all_beat is True and verdict == "REPORT_ONLY"
+    assert any("insufficient cases" in r for r in reasons)
 
 
 @pytest.mark.jax

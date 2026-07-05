@@ -9,12 +9,15 @@
 | 2700 | 0.4580 | 0.4626 | -0.0046 | 0.1309 | 0.1740 | 3.4987 | 0.3257 | True |
 | 3300 | 1.1007 | 1.1392 | -0.0385 | 0.3316 | 0.5888 | 3.3190 | 1.2708 | True |
 
-## Aggregate
+## Window reproducibility (같은 fixture, 연속 window)
 - windows: 4
 - DA beats background in: 2/4 windows
 - mean Δrmse (DA − background): +0.0238
 - beats background in ALL windows: False
 
 ## Promotion gate (design §11)
+**window ≠ 독립 case**: 한 fixture의 연속 window는 서로 독립이 아니므로 promotion은 `n_cases=1`(단일 fixture)로 판정한다. 따라서 window를 모두 이겨도 단일 fixture로는 PROMOTE되지 않는다(독립 station/day를 늘려야 n_cases 증가).
+- promotion_cases: 1  ·  window_reproducibility: 2/4
 - verdict: **REPORT_ONLY**
+- insufficient cases: 1 < 3 (report-only)
 - does not beat baseline in every window

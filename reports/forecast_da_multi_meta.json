@@ -7,9 +7,12 @@
   "bg_weight": 0.05,
   "da_beats_background": 2,
   "beats_all": false,
+  "window_reproducibility": "2/4",
+  "promotion_cases": 1,
   "mean_delta_da_minus_bg": 0.0238057069394478,
   "promotion_verdict": "REPORT_ONLY",
   "promotion_reasons": [
+    "insufficient cases: 1 < 3 (report-only)",
     "does not beat baseline in every window"
   ],
   "windows": [

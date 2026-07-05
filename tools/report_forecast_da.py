@@ -214,11 +214,14 @@ def main():
     ap.add_argument("--bg-w", type=float, default=BG_WEIGHT, dest="bg_w",
                     help="background regularization on the state correction")
     args = ap.parse_args()
-    for nm, v in (("window", args.window), ("lead", args.lead), ("k0", args.k0)):
+    if args.k0 < 0:                                   # k0=0 is a valid start (no spin)
+        ap.error("--k0 must be non-negative")
+    for nm, v in (("window", args.window), ("lead", args.lead)):
         if v <= 0:
             ap.error(f"--{nm} must be positive")
-    if args.bg_w < 0:
-        ap.error("--bg-w must be non-negative")
+    import math as _math
+    if not _math.isfinite(args.bg_w) or args.bg_w < 0:
+        ap.error("--bg-w must be a finite non-negative number")
     r = build(args.k0, args.window, args.lead, args.bg_w)
     rows = _rows(r)
     outdir = REPO / "reports"; outdir.mkdir(exist_ok=True)
@@ -239,7 +242,8 @@ def main():
              f"analysis start k0={r['k0']} · 동화창 [k0, k0+{r['window']}) valid obs {r['valid_win']}개 · "
              f"예보 lead {r['lead']}스텝 valid obs {r['valid_lead']}개. "
              "gate: RMSE만 hard. **deviation/physics-burden 감사는 미적용**(dry 모델은 storage를 "
-             "진행하지 않음 — full-model 개념). degradation_ratio = 예보RMSE / 동화창RMSE(>1이면 overfit).",
+             "진행하지 않음 — full-model 개념). degradation_ratio = 예보RMSE / 동화창RMSE "
+             "(>1이면 overfit 또는 lead 구간이 동화창보다 본질적으로 더 어려움 — 둘을 분리해 볼 것).",
              "", head, sep]
     for row in rows:
         lines.append("| " + " | ".join(
@@ -252,7 +256,8 @@ def main():
               f"- state correction dx (layers 1:5, degC): "
               f"[{', '.join(f'{v:+.3f}' for v in r['dx'])}]",
               "", "해석: Δrmse<0이면 초기상태 동화가 자유예보를 개선(초기조건 오차가 lead에서 지배적). "
-              "Δrmse≥0이면 model error가 지배적이거나 동화가 창에 overfit(degradation_ratio로 구분)."]
+              "Δrmse≥0이면 model error가 지배적이거나 동화가 창에 overfit, 또는 lead가 동화창보다 "
+              "본질적으로 어려운 구간일 수 있음(degradation_ratio를 window 난이도와 분리해 판단)."]
     (outdir / "forecast_da.md").write_text("\n".join(lines) + "\n", encoding="utf-8")
     (outdir / "forecast_da.csv").write_text(buf.getvalue(), encoding="utf-8")
 

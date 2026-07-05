@@ -31,10 +31,13 @@ def summarize(results):
                      "train_da": r["da"][1], "train_bg": r["bg"][1],
                      "da_degradation": r["degradation_da"], "dx_l2": r["dx_l2"],
                      "beats_bg": beats})
-    n_cases = len(rows)
     all_beat = bool(rows) and all(x["beats_bg"] for x in rows)
-    # skill-only promotion (no deviation summary in the dry thermal model)
-    verdict, reasons = promotion_gate(n_cases=n_cases, windows_beat_baseline=all_beat)
+    # IMPORTANT: consecutive windows of ONE fixture are NOT independent cases. Window
+    # reproducibility (n_beat/N) and independent-case promotion are DIFFERENT gates, so
+    # promotion sees n_cases=1 (a single fixture) — it can never PROMOTE from one fixture
+    # even at 4/4, matching the conservative report-only philosophy. Distinct
+    # stations/days would raise n_cases. (skill-only: no deviation summary in dry model.)
+    verdict, reasons = promotion_gate(n_cases=1, windows_beat_baseline=all_beat)
     return rows, all_beat, (verdict, reasons)
 
 
@@ -52,11 +55,14 @@ def main():
     ap.add_argument("--bg-w", type=float, default=None, dest="bg_w",
                     help="background regularization (default: report_forecast_da.BG_WEIGHT)")
     args = ap.parse_args()
-    for nm, v in (("k0", args.k0), ("windows", args.windows), ("window", args.window), ("lead", args.lead)):
+    if args.k0 < 0:                                   # k0=0 is a valid start (no spin)
+        ap.error("--k0 must be non-negative")
+    for nm, v in (("windows", args.windows), ("window", args.window), ("lead", args.lead)):
         if v <= 0:
             ap.error(f"--{nm} must be positive")
-    if args.bg_w is not None and args.bg_w < 0:
-        ap.error("--bg-w must be non-negative")
+    import math as _math
+    if args.bg_w is not None and (not _math.isfinite(args.bg_w) or args.bg_w < 0):
+        ap.error("--bg-w must be a finite non-negative number")
 
     from tools.report_forecast_da import BG_WEIGHT
     bg_w = BG_WEIGHT if args.bg_w is None else args.bg_w
@@ -87,12 +93,16 @@ def main():
              else f"{r[c]:.4f}" if c in ("da_rmse", "bg_rmse", "train_da", "train_bg",
                                          "da_degradation", "dx_l2")
              else str(r[c])) for c in _COLS) + " |")
-    lines += ["", "## Aggregate",
+    lines += ["", "## Window reproducibility (같은 fixture, 연속 window)",
               f"- windows: {len(rows)}",
               f"- DA beats background in: {n_beat}/{len(rows)} windows",
               f"- mean Δrmse (DA − background): {mean_delta:+.4f}",
               f"- beats background in ALL windows: {all_beat}",
               "", "## Promotion gate (design §11)",
+              "**window ≠ 독립 case**: 한 fixture의 연속 window는 서로 독립이 아니므로 promotion은 "
+              "`n_cases=1`(단일 fixture)로 판정한다. 따라서 window를 모두 이겨도 단일 fixture로는 "
+              "PROMOTE되지 않는다(독립 station/day를 늘려야 n_cases 증가).",
+              f"- promotion_cases: 1  ·  window_reproducibility: {n_beat}/{len(rows)}",
               f"- verdict: **{verdict}**",
               *[f"- {x}" for x in reasons]]
     (outdir / "forecast_da_multi.md").write_text("\n".join(lines) + "\n", encoding="utf-8")
@@ -102,6 +112,7 @@ def main():
     meta = {"k0_first": args.k0, "n_windows_requested": args.windows,
             "n_windows_valid": len(rows), "window": args.window, "lead": args.lead,
             "bg_weight": bg_w, "da_beats_background": n_beat, "beats_all": all_beat,
+            "window_reproducibility": f"{n_beat}/{len(rows)}", "promotion_cases": 1,
             "mean_delta_da_minus_bg": mean_delta, "promotion_verdict": verdict,
             "promotion_reasons": reasons, "windows": rows}
     (outdir / "forecast_da_multi_meta.json").write_text(_json.dumps(meta, indent=2), encoding="utf-8")
