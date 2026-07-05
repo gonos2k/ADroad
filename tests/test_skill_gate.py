@@ -314,3 +314,5 @@ def test_skill_report_serialization():
         skill_report_csv([{**row, "freeze_thaw_accuracy": 2.0}])   # fraction in [0,1]
     with pytest.raises(SkillError):
         skill_report_csv([{**row, "n": 1.5}])         # count must be whole
+    with pytest.raises(SkillError):
+        skill_report_csv([{**row, "model": None}])    # str(None)=="None" must not pass

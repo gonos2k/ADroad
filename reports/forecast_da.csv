@@ -1,0 +1,4 @@
+model,rmse,mae,freeze_thaw_accuracy,train_rmse,degradation_ratio,gate_vs_bg,gate_vs_const
+constant_initial,0.9179765577879144,0.804375,1.0,,,baseline,baseline
+no_DA(background),0.22101872465336772,0.17957962543413614,1.0,0.3529553857515806,0.6261945094922751,baseline,PASS
+DA(state),0.20824556846504136,0.18707868687599322,1.0,0.21825532871976291,0.9541373843496213,PASS,PASS

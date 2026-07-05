@@ -1,0 +1,23 @@
+{
+  "k0": 2000,
+  "window": 120,
+  "lead": 480,
+  "bg_weight": 0.05,
+  "valid_win": 120,
+  "valid_lead": 480,
+  "da_forecast_rmse": 0.20824556846504136,
+  "bg_forecast_rmse": 0.22101872465336772,
+  "const_forecast_rmse": 0.9179765577879144,
+  "rmse_delta_da_minus_bg": -0.012773156188326362,
+  "da_train_rmse": 0.21825532871976291,
+  "bg_train_rmse": 0.3529553857515806,
+  "da_degradation_ratio": 0.9541373843496213,
+  "bg_degradation_ratio": 0.6261945094922751,
+  "da_gate_vs_bg": "PASS",
+  "state_correction_dx": [
+    -0.008449019936176059,
+    -0.055203210040975705,
+    -0.5863789005551274,
+    -0.44078950168126574
+  ]
+}

@@ -315,10 +315,10 @@ def _require_columns(row):
             raise SkillError("row[cold_rmse] required when cold_n > 0")
         if _finite_scalar("row[cold_rmse]", row["cold_rmse"]) < 0.0:
             raise SkillError("row[cold_rmse] must be non-negative")
-    # model/gate are report labels: must be non-empty strings (so a blank/None
-    # doesn't produce an anonymous, un-attributable row).
+    # model/gate are report labels: must be actual non-empty strings — str(None) would
+    # otherwise serialize as the literal "None", producing an un-attributable row.
     for c in ("model", "gate"):
-        if not str(row[c]).strip():
+        if not isinstance(row[c], str) or not row[c].strip():
             raise SkillError(f"row[{c}] must be a non-empty string")
 
 
