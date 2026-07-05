@@ -63,6 +63,15 @@ pytest -q                     →  전부 통과 (배치 권장: pytest -m "not 
 **fixture 도메인(no-coupling rollout) 내부**에서만 보장된다. 극단 비물리 입력에서
 reference(clip 없음)와 갈라질 수 있다 — exact parity는 정상 기상 범위 주장이다.
 
+## deviation-budget 정량화 (감사층 → 품질 지표)
+`droad/deviation.py`: `full_rollout(return_ledger=True)` 감사 trail을 case 단위로 집계 —
+`max_primary_residual`(P0 회계 게이트, ~0 필수), diagnostics 카운트(over-melt/overflow/negative-pre-clamp),
+`diagnostic_steps_rate`, `max_storage_jump`. residual=코드 누출 게이트, diagnostics=물리 신호(카운트, 실패
+아님). `accounting_gate`/`budget_to_csv`/`budget_to_markdown` + `tools/report_deviation_budget.py`.
+**baseline(no-coupling 12,959스텝)**: residual **4.4e-16**(PASS), diagnostics 56건 전부 `negative_pre_clamp`
+(0.43% 스텝), over-melt·overflow 0, max_storage_jump 0.10mm → `reports/deviation_budget_baseline.{md,csv}`.
+forecast skill gate·diagnostics-aware DA 평가의 공통 기반.
+
 ## 코드 리뷰 반영 (13차: tolerance 분리 + set 거부)
 `merge_ledgers`가 `residual_atol`/`continuity_atol`을 독립 지정 가능(회계 leak vs float join 오차는 의미가
 달라 float32/대규모 rollout에서 갈릴 수 있음; `atol`은 둘의 공통 기본값, 하위호환 유지). `_normalize_diagnostics`가

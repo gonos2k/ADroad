@@ -13,4 +13,5 @@ __all__ = [
     "storage", "model", "driver",            # NumPy exact-mode physics
     "jax_model", "jax_storage",              # differentiable backend
     "assimilate", "dual",                    # DA / calibration
+    "deviation",                             # deviation-budget aggregation
 ]
