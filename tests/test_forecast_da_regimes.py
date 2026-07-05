@@ -7,7 +7,9 @@ import pytest
 
 REPO = Path(__file__).resolve().parent.parent
 sys.path.insert(0, str(REPO))
-from tools.analyze_forecast_da_regimes import _features, summarize_regimes  # noqa: E402
+from tools.analyze_forecast_da_regimes import (  # noqa: E402
+    _features, summarize_regimes, group_separators,
+)
 
 
 def _synth(k0, beats, delta, bg_init, obs_std, dx_l2=0.5):
@@ -44,6 +46,20 @@ def test_summarize_ranks_separating_feature():
     # table is sorted by separation descending
     seps = [t["separation"] for t in table]
     assert seps == sorted(seps, reverse=True)
+
+
+def test_group_separators_splits_families():
+    results = [_synth(2700, True, -0.04, 0.50, 0.5), _synth(1500, False, 0.12, 0.10, 0.5)]
+    _rows, _w, _l, table = summarize_regimes(results)
+    grouped = group_separators(table)
+    # ex-ante forcing must not contain endogenous DA-response features and vice versa
+    ex_ante = {t["feature"] for t in grouped["ex_ante_forcing"]}
+    da_resp = {t["feature"] for t in grouped["da_response"]}
+    assert "tair_std" in ex_ante and "dx_l2" not in ex_ante
+    assert "bg_init_error" in da_resp and "dx_layer1" in da_resp
+    assert "obs_std" in {t["feature"] for t in grouped["post_hoc_obs"]}
+    # every separator carries a family tag
+    assert all("family" in t for t in table)
 
 
 def test_summarize_rejects_empty():
