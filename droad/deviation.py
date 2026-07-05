@@ -19,7 +19,6 @@ from __future__ import annotations
 
 import csv
 import io
-import math
 from collections import Counter
 from collections.abc import Mapping as ABCMapping
 
@@ -55,15 +54,8 @@ def _max_storage_jump(out, n_steps: int) -> float:
             raise LedgerError(f"{k} trajectory must be a sized sequence") from None
         if L != n_steps:
             raise LedgerError(f"{k} length {L} != n_steps {n_steps}")
-        vals = []
-        for i, x in enumerate(seq):          # validate every value, incl. length-1
-            try:
-                v = float(x)
-            except (TypeError, ValueError):
-                raise LedgerError(f"{k} has non-scalar storage value at step {i}") from None
-            if not math.isfinite(v):
-                raise LedgerError(f"{k} has non-finite storage value at step {i}")
-            vals.append(v)
+        # same numeric policy as ledger fields: rejects str/bool/non-scalar/NaN/Inf
+        vals = [as_finite_float(f"{k}[{i}]", x) for i, x in enumerate(seq)]
         for i in range(1, len(vals)):
             d = abs(vals[i] - vals[i - 1])
             if d > jump:
@@ -153,12 +145,17 @@ _COLUMNS = ("case_id", "n_steps", "max_primary_residual", "n_diagnostics_total",
             "negative_pre_clamp_count", "max_storage_jump")
 
 
+_NUMERIC_COLUMNS = tuple(c for c in _COLUMNS if c != "case_id")
+
+
 def _require_columns(s):
     if not isinstance(s, ABCMapping):
         raise LedgerError("summary must be a mapping")
     missing = set(_COLUMNS) - set(s)
     if missing:
         raise LedgerError(f"summary missing columns: {sorted(missing, key=str)}")
+    for c in _NUMERIC_COLUMNS:          # numeric columns must be finite scalars
+        as_finite_float(f"summary[{c}]", s[c])
 
 
 def _fmt(s, c):

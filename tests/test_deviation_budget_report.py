@@ -156,6 +156,21 @@ def test_budget_rejects_mapping_storage_trajectory():
                           "Water": {0: 0.0, 1: 0.1}})    # mapping, not sequence
 
 
+def test_storage_element_rejects_bool_and_string():
+    for bad in ([0.0, "1.0"], [False, True]):
+        with pytest.raises(LedgerError):                 # str/bool element rejected like ledger fields
+            deviation_budget({"ledger": _clean(2), "diagnostics": [(), ()], "Water": bad})
+
+
+def test_serialization_rejects_nonfinite_numeric_column():
+    b = deviation_budget({"ledger": _clean(1), "diagnostics": [()]})
+    b = dict(b); b["max_storage_jump"] = float("nan")    # forge a bad numeric column
+    with pytest.raises(LedgerError):
+        budget_to_csv([b])
+    with pytest.raises(LedgerError):
+        budget_to_markdown([b])
+
+
 def test_budget_serialization():
     b = deviation_budget({"ledger": _clean(3),
                           "diagnostics": [(), ("ice_over_melt",), ()]}, case_id="c2")
