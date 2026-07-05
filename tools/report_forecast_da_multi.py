@@ -66,7 +66,7 @@ def main():
 
     from tools.report_forecast_da import BG_WEIGHT
     bg_w = BG_WEIGHT if args.bg_w is None else args.bg_w
-    results = build_multi(args.k0, args.windows, args.window, args.lead, bg_w)
+    results, skipped = build_multi(args.k0, args.windows, args.window, args.lead, bg_w)
     if not results:
         raise RuntimeError("no window had enough valid observations")
     rows, all_beat, (verdict, reasons) = summarize(results)
@@ -114,7 +114,7 @@ def main():
             "bg_weight": bg_w, "da_beats_background": n_beat, "beats_all": all_beat,
             "window_reproducibility": f"{n_beat}/{len(rows)}", "promotion_cases": 1,
             "mean_delta_da_minus_bg": mean_delta, "promotion_verdict": verdict,
-            "promotion_reasons": reasons, "windows": rows}
+            "promotion_reasons": reasons, "skipped_windows": skipped, "windows": rows}
     (outdir / "forecast_da_multi_meta.json").write_text(_json.dumps(meta, indent=2), encoding="utf-8")
     print("wrote reports/forecast_da_multi.{md,csv} + forecast_da_multi_meta.json")
     for r in rows:

@@ -14,6 +14,15 @@ def _m(rmse, mae=0.1, ft=1.0):
     return {"rmse": rmse, "mae": mae, "freeze_thaw_accuracy": ft}
 
 
+def test_validate_cycle_args():
+    from tools.report_forecast_da import _validate_cycle_args
+    _validate_cycle_args(0, 10, 10, 0.0)          # k0=0 allowed; all fine
+    for bad in [(-1, 10, 10, 0.0), (0, 0, 10, 0.0), (0, 10, -1, 0.0),
+                (0, 10, 10, -0.1), (0, 10, 10, float("nan"))]:
+        with pytest.raises(ValueError):
+            _validate_cycle_args(*bad)
+
+
 def test_slice_forc_slices_every_array():
     forc = {"Tair": list(range(10)), "obs": list(range(10, 20))}
     sl = _slice_forc(forc, 2, 5)

@@ -87,8 +87,21 @@ def _slice_forc(forc, a, b):
     return {k: v[a:b] for k, v in forc.items()}
 
 
+def _validate_cycle_args(k0, window, lead, bg_w):
+    """Same bar as the CLI, but enforced in the Python API too (build/build_multi
+    can be imported and called directly, not only via main())."""
+    import math
+    if k0 < 0:
+        raise ValueError("k0 must be non-negative")
+    if window <= 0 or lead <= 0:
+        raise ValueError("window/lead must be positive")
+    if not math.isfinite(bg_w) or bg_w < 0:
+        raise ValueError("bg_w must be finite and non-negative")
+
+
 def build(k0=K0, window=WINDOW, lead=LEAD, bg_w=BG_WEIGHT):
     """Single-window forecast-DA cycle: spin to k0, then run assimilate->forecast."""
+    _validate_cycle_args(k0, window, lead, bg_w)
     m, objs, jnp, dd, jm, fit = _setup()
     _advance(m, objs, 0, k0)
     static, forc, phy_d, x_b, tso = _span(dd, objs, jnp, k0, window + lead)
@@ -98,25 +111,30 @@ def build(k0=K0, window=WINDOW, lead=LEAD, bg_w=BG_WEIGHT):
 def build_multi(k0_first, n_windows, window=WINDOW, lead=LEAD, bg_w=BG_WEIGHT):
     """Run the forecast-DA cycle on n_windows CONSECUTIVE analysis windows, spinning
     the reference forward ONCE (not re-spinning per window). Windows with too few
-    valid obs are skipped. Returns the list of per-window result dicts."""
+    valid obs are skipped. Returns (results, skipped): results is the list of
+    per-window result dicts; skipped records why each dropped window was dropped."""
+    _validate_cycle_args(k0_first, window, lead, bg_w)
+    if n_windows <= 0:
+        raise ValueError("n_windows must be positive")
     m, objs, jnp, dd, jm, fit = _setup()
     mi = objs[0]
     avail = min(len(mi.TSurfObs), len(mi.Tair), len(mi.time))
     span = window + lead
     _advance(m, objs, 0, k0_first)
-    results, cursor = [], k0_first
+    results, skipped, cursor = [], [], k0_first
     for _ in range(n_windows):
         if cursor + span > avail:             # out of data -> stop cleanly (not a fatal error)
+            skipped.append({"k0": cursor, "reason": "out_of_range"})
             break
         static, forc, phy_d, x_b, tso = _span(dd, objs, jnp, cursor, span)
         try:
             results.append(_da_cycle(jm, fit, jnp, static, forc, phy_d, x_b, tso,
                                      window, lead, bg_w, cursor))
         except RuntimeError:
-            pass                              # window without enough valid obs -> not a case
+            skipped.append({"k0": cursor, "reason": "too_few_valid_obs"})
         _advance(m, objs, cursor, span)       # move reference to the next window start
         cursor += span
-    return results
+    return results, skipped
 
 
 def _da_cycle(jm, fit, jnp, static, forc, phy_d, x_b, tso, window, lead, bg_w, k0):
@@ -173,6 +191,29 @@ def _da_cycle(jm, fit, jnp, static, forc, phy_d, x_b, tso, window, lead, bg_w, k
     g_da_vs_const = skill_gate(m_da, m_const)
     g_bg_vs_const = skill_gate(m_bg, m_const)    # no-DA's OWN gate vs const (not DA's)
     dx = np.asarray(dx_opt, float)
+    # window regime features — to explain WHEN state-DA helps vs hurts (case-study, not
+    # a statistical test with N=4). Forcing/obs difficulty over the lead + DA-internal
+    # correction magnitude; the regime report groups these by win/lose.
+    tl = np.asarray(forc_lead["Tair"], float)
+    regime = {
+        # forcing over the lead
+        "tair_mean": float(tl.mean()), "tair_std": float(tl.std()),
+        "tair_range": float(tl.max() - tl.min()), "tair_trend_abs": float(abs(tl[-1] - tl[0])),
+        "sw_mean": float(np.asarray(forc_lead["SW"], float).mean()),
+        "lw_mean": float(np.asarray(forc_lead["LW"], float).mean()),
+        "vz_mean": float(np.asarray(forc_lead["VZ"], float).mean()),
+        "rhz_mean": float(np.asarray(forc_lead["Rhz"], float).mean()),
+        "is_night_fraction": float(np.asarray(forc_lead["is_night"]).mean()),
+        # observation difficulty over the (valid) lead
+        "const_rmse": m_const["rmse"], "obs_std": float(ol.std()),
+        "obs_range": float(ol.max() - ol.min()), "obs_trend_abs": float(abs(ol[-1] - ol[0])),
+        "obs_step_change_mean": float(np.abs(np.diff(ol)).mean()) if ol.size > 1 else 0.0,
+        "obs_step_change_max": float(np.abs(np.diff(ol)).max()) if ol.size > 1 else 0.0,
+        "freeze_crossing_count": int(np.sum(np.diff((ol >= 0.0).astype(int)) != 0)),
+        "cold_fraction": float(np.mean(ol < 0.0)),
+        # DA-internal correction magnitude / fit
+        "bg_init_error": train_bg, "dx_layers": [float(v) for v in dx],
+    }
     return {"k0": k0, "window": window, "lead": lead, "bg_w": bg_w,
             "valid_win": int(valid_win.sum()), "valid_lead": int(valid_lead.sum()),
             "dx": [float(v) for v in dx],
@@ -183,7 +224,8 @@ def _da_cycle(jm, fit, jnp, static, forc, phy_d, x_b, tso, window, lead, bg_w, k
             "rmse_delta_da_minus_bg": m_da["rmse"] - m_bg["rmse"],
             "train_delta_da_minus_bg": train_da - train_bg,
             "degradation_da": degradation_ratio(m_da["rmse"], train_da),
-            "degradation_bg": degradation_ratio(m_bg["rmse"], train_bg)}
+            "degradation_bg": degradation_ratio(m_bg["rmse"], train_bg),
+            "regime": regime}
 
 
 _COLS = ("model", "rmse", "mae", "freeze_thaw_accuracy", "train_rmse",
