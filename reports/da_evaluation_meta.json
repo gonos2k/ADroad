@@ -4,6 +4,10 @@
     2000,
     2200
   ],
+  "holdout_interval": [
+    2200,
+    3999
+  ],
   "cal_valid_n": 200,
   "holdout_n": 1800,
   "default_emiss": 0.95,
@@ -11,5 +15,11 @@
   "one_step_persistence_rmse": 0.007768916398685116,
   "rmse_delta_da_minus_default": 0.0061131155601577,
   "mae_delta_da_minus_default": 0.010692546511970408,
-  "physics_worse": false
+  "physics_worse": false,
+  "da_gate_vs_const": "PASS",
+  "da_gate_vs_default": "FAIL \u2014 forecast RMSE 0.1555 worse than baseline 0.1494",
+  "default_holdout_residual": 1.734723475976807e-18,
+  "da_holdout_residual": 1.734723475976807e-18,
+  "default_holdout_diagnostic_steps_rate": 0.014444444444444444,
+  "da_holdout_diagnostic_steps_rate": 0.014444444444444444
 }

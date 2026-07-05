@@ -170,13 +170,14 @@ def skill_gate(candidate: dict, baseline: dict, *, deviation=None, baseline_devi
     rmse_worse_frac = _finite_scalar("rmse_worse_frac", rmse_worse_frac)
     residual_atol = _finite_scalar("residual_atol", residual_atol)
     rate_worse_abs = _finite_scalar("rate_worse_abs", rate_worse_abs)
-    over_melt_worse_abs = _finite_scalar("over_melt_worse_abs", over_melt_worse_abs)
-    overflow_worse_abs = _finite_scalar("overflow_worse_abs", overflow_worse_abs)
+    # over_melt/overflow are COUNTS: their slack must be a whole non-negative number
+    over_melt_worse_abs = _int_count("over_melt_worse_abs", over_melt_worse_abs)
+    overflow_worse_abs = _int_count("overflow_worse_abs", overflow_worse_abs)
     if c_rmse < 0.0 or b_rmse < 0.0 or residual_atol < 0.0:
         raise SkillError("rmse and residual_atol must be non-negative")
     # slacks widen the gate; a negative slack silently makes it STRICTER than
     # intended (API misuse), so reject rather than honor it.
-    if min(rmse_worse_frac, rate_worse_abs, over_melt_worse_abs, overflow_worse_abs) < 0.0:
+    if rmse_worse_frac < 0.0 or rate_worse_abs < 0.0:
         raise SkillError("gate tolerances/slacks must be non-negative")
     reasons = []
     if c_rmse > b_rmse * (1.0 + rmse_worse_frac):
@@ -255,8 +256,12 @@ def promotion_gate(*, n_cases, windows_beat_baseline, deviation=None,
         dv = _require_dev_summary(deviation, "deviation")   # schema + finite + non-negative residual
         if dv["max_primary_residual"] > residual_atol:
             reasons.append(f"accounting residual {dv['max_primary_residual']:.3e} > {residual_atol:.0e}")
-        if baseline_deviation is not None and diagnostics_delta(deviation, baseline_deviation)["physics_worse"]:
-            reasons.append("physics burden worse than baseline")
+        if baseline_deviation is not None:
+            # strict schema here too — promotion is high-stakes, so don't lean on the
+            # permissive missing=0 policy of diagnostics_delta for the baseline.
+            _require_dev_summary(baseline_deviation, "baseline_deviation")
+            if diagnostics_delta(deviation, baseline_deviation)["physics_worse"]:
+                reasons.append("physics burden worse than baseline")
     return ("PROMOTE" if not reasons else "REPORT_ONLY"), reasons
 
 

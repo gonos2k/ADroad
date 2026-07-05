@@ -74,13 +74,10 @@ def _max_storage_jump(store, n_steps: int) -> dict:
 
 def _as_step_index(name: str, x) -> int:
     """One step index: a WHOLE number, not a bool (True->1 would corrupt a window)
-    and not a float that silently truncates (1.9->1)."""
-    if isinstance(x, bool):
-        raise LedgerError(f"{name} must be an integer index, not bool")
-    try:
-        v = float(x)
-    except (TypeError, ValueError):
-        raise LedgerError(f"{name} must be an integer index, got {x!r}") from None
+    and not a float that silently truncates (1.9->1). Reuses as_finite_float so the
+    str/Python-bool/numpy-bool/NaN/Inf policy is IDENTICAL to the ledger/deviation
+    numeric contract — then adds the integer-only requirement on top."""
+    v = as_finite_float(name, x)              # rejects str/bool/np.bool_/NaN/Inf
     if not v.is_integer():
         raise LedgerError(f"{name} must be a whole-number index, got {x!r}")
     return int(v)

@@ -144,6 +144,7 @@ def build(max_steps=None):
     g_da_vs_def = skill_gate(m_da, m_def, deviation=dev_da_h, baseline_deviation=dev_def_h)
     delta = diagnostics_delta(dev_da_h, dev_def_h)
     return {"n": n, "holdout_n": len(idx), "cal_window": (K0, K0 + NA),
+            "holdout_interval": (int(idx[0]), int(idx[-1])),
             "cal_valid_n": cal_valid_n, "one_step_rmse": m_one_step["rmse"],
             "cal_emiss": cal_emiss, "def_emiss": def_emiss,
             "const": m_const, "def": (m_def, dev_def_h, g_def),
@@ -203,7 +204,9 @@ def main():
              f"참조: 1-step persistence RMSE = {r['one_step_rmse']:.4f}(30s에서 자명 → gate baseline 부적합, gate에 미사용). "
              "gate: RMSE만 hard, MAE/freeze-thaw는 report-only.",
              "",
-             "표의 residual/over_melt/overflow는 **holdout window 집계**(skill window와 정렬). "
+             f"표의 residual/over_melt/overflow는 **holdout interval [{r['holdout_interval'][0]}, "
+             f"{r['holdout_interval'][1]}] 집계**(skill window와 정렬; forecast 오차는 obs 시각에서, "
+             "물리 부담은 그 사이 모든 model step에서 누적 — analysis-time 첫 step 포함). "
              "전체 rollout 감사값은 아래 'Full-run audit' 참조.",
              "", head, sep]
     import csv as _csv, io as _io
@@ -231,13 +234,22 @@ def main():
     # machine-readable metadata sidecar: reference metrics + window provenance so a
     # downstream reader can reproduce the baseline argument without parsing Markdown.
     import json as _json
+    dev_def_h, dev_da_h = r["def"][1], r["da"][1]
+    da_row = rows[2]                            # constant_initial, default, DA
     meta = {"n_steps": r["n"], "cal_window": list(r["cal_window"]),
+            "holdout_interval": list(r["holdout_interval"]),
             "cal_valid_n": r["cal_valid_n"], "holdout_n": r["holdout_n"],
             "default_emiss": r["def_emiss"], "calibrated_emiss": r["cal_emiss"],
             "one_step_persistence_rmse": r["one_step_rmse"],
             "rmse_delta_da_minus_default": r["rmse_delta_vs_default"],
             "mae_delta_da_minus_default": r["mae_delta_vs_default"],
-            "physics_worse": r["delta"]["physics_worse"]}
+            "physics_worse": r["delta"]["physics_worse"],
+            "da_gate_vs_const": da_row["gate_vs_const"],
+            "da_gate_vs_default": da_row["gate_vs_default"],
+            "default_holdout_residual": dev_def_h["max_primary_residual"],
+            "da_holdout_residual": dev_da_h["max_primary_residual"],
+            "default_holdout_diagnostic_steps_rate": dev_def_h["diagnostic_steps_rate"],
+            "da_holdout_diagnostic_steps_rate": dev_da_h["diagnostic_steps_rate"]}
     (outdir / "da_evaluation_meta.json").write_text(_json.dumps(meta, indent=2), encoding="utf-8")
     print("wrote reports/da_evaluation.{md,csv} + da_evaluation_meta.json")
     for row in rows:

@@ -233,6 +233,23 @@ def test_promotion_gate_baseline_dev_requires_deviation():
         promotion_gate(n_cases=5, windows_beat_baseline=True, baseline_deviation=base_dev)
 
 
+def test_promotion_gate_validates_baseline_deviation_schema():
+    dev = {"max_primary_residual": 0.0, "diagnostic_steps_rate": 0.0,
+           "over_melt_count": 0, "overflow_count": 0}
+    with pytest.raises(SkillError):              # baseline missing overflow_count -> strict reject
+        promotion_gate(n_cases=5, windows_beat_baseline=True, deviation=dev,
+                       baseline_deviation={"max_primary_residual": 0.0,
+                                           "diagnostic_steps_rate": 0.0, "over_melt_count": 0})
+
+
+def test_skill_gate_rejects_fractional_count_slack():
+    cand, base = {"rmse": 0.2}, {"rmse": 5.0}
+    with pytest.raises(SkillError):              # over_melt_worse_abs is a count -> whole number
+        skill_gate(cand, base, over_melt_worse_abs=0.5)
+    with pytest.raises(SkillError):
+        skill_gate(cand, base, overflow_worse_abs=1.5)
+
+
 def test_finite_scalar_rejects_numpy_bool():
     import numpy as np
     with pytest.raises(SkillError):
