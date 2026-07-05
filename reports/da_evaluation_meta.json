@@ -21,5 +21,9 @@
   "default_holdout_residual": 1.734723475976807e-18,
   "da_holdout_residual": 1.734723475976807e-18,
   "default_holdout_diagnostic_steps_rate": 0.014444444444444444,
-  "da_holdout_diagnostic_steps_rate": 0.014444444444444444
+  "da_holdout_diagnostic_steps_rate": 0.014444444444444444,
+  "default_holdout_over_melt_count": 0,
+  "da_holdout_over_melt_count": 0,
+  "default_holdout_overflow_count": 0,
+  "da_holdout_overflow_count": 0
 }

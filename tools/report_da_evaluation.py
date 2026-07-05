@@ -251,7 +251,11 @@ def main():
             "default_holdout_residual": dev_def_h["max_primary_residual"],
             "da_holdout_residual": dev_da_h["max_primary_residual"],
             "default_holdout_diagnostic_steps_rate": dev_def_h["diagnostic_steps_rate"],
-            "da_holdout_diagnostic_steps_rate": dev_da_h["diagnostic_steps_rate"]}
+            "da_holdout_diagnostic_steps_rate": dev_da_h["diagnostic_steps_rate"],
+            "default_holdout_over_melt_count": dev_def_h["over_melt_count"],
+            "da_holdout_over_melt_count": dev_da_h["over_melt_count"],
+            "default_holdout_overflow_count": dev_def_h["overflow_count"],
+            "da_holdout_overflow_count": dev_da_h["overflow_count"]}
     (outdir / "da_evaluation_meta.json").write_text(_json.dumps(meta, indent=2), encoding="utf-8")
     print("wrote reports/da_evaluation.{md,csv} + da_evaluation_meta.json")
     for row in rows:

@@ -119,6 +119,12 @@ def deviation_budget(out, case_id: str = "case", *, steps=None) -> dict:
     When `steps` is given (an index sequence), the budget is aggregated over ONLY those
     rollout steps — used to align diagnostics with a holdout forecast window so a
     skill gate compares like-for-like physics burden (not full-run vs holdout skill).
+
+    `steps` may be non-contiguous (any strictly-increasing selection, e.g. valid-obs
+    indices). In that case max_storage_jump is the largest jump between ADJACENT
+    SELECTED entries, not a single-model-step jump; max_storage_jump_step is still the
+    ORIGINAL rollout index. Pass a contiguous range (as the DA report does) if you need
+    literal single-step jump semantics.
     """
     if not isinstance(out, ABCMapping):
         raise LedgerError("deviation_budget input must be a full_rollout(return_ledger=True) mapping")

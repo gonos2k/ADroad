@@ -285,6 +285,12 @@ def _require_columns(row):
     missing = set(_COLUMNS) - set(row)
     if missing:
         raise SkillError(f"skill row missing columns: {sorted(missing, key=str)}")
+    # numeric columns must be finite scalars (same bar as the deviation report) —
+    # so a stray rmse="bad" / freeze_thaw_accuracy=2.0 can't be silently serialized.
+    for c in ("n", "rmse", "mae", "freeze_thaw_accuracy", "cold_n"):
+        _finite_scalar(f"row[{c}]", row[c])
+    if row["cold_rmse"] is not None:            # cold_rmse is None when no cold obs
+        _finite_scalar("row[cold_rmse]", row["cold_rmse"])
 
 
 def skill_report_csv(rows) -> str:

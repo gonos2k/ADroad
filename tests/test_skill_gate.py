@@ -287,3 +287,8 @@ def test_skill_report_serialization():
     assert "default" in md and "gate" in md
     with pytest.raises(SkillError):
         skill_report_csv([{"model": "x"}])           # missing columns
+    bad = {**row, "rmse": "bad"}                      # non-numeric metric can't be serialized
+    with pytest.raises(SkillError):
+        skill_report_csv([bad])
+    with pytest.raises(SkillError):
+        skill_report_markdown([{**row, "freeze_thaw_accuracy": float("nan")}])

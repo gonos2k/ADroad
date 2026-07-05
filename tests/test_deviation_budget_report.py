@@ -69,6 +69,16 @@ def test_budget_steps_reports_original_jump_step():
     assert b["max_storage_jump_step"] == 3           # original rollout step, not local index 1
 
 
+def test_budget_noncontiguous_steps_jump_between_adjacent_selected():
+    # non-contiguous [0,2,4]: jump is between ADJACENT SELECTED entries (0.0->0.4),
+    # reported at the ORIGINAL step of the later selected entry.
+    out = {"ledger": _clean(5), "diagnostics": [(), (), (), (), ()],
+           "Water": [0.0, 9.9, 0.4, 9.9, 0.5]}     # step 1,3 excluded from selection
+    b = deviation_budget(out, steps=[0, 2, 4])
+    assert b["max_storage_jump"] == pytest.approx(0.4)   # 0.0->0.4 across selected 0->2
+    assert b["max_storage_jump_step"] == 2               # original index of later entry
+
+
 def test_budget_steps_validation():
     out = {"ledger": _clean(3), "diagnostics": [(), (), ()],
            "Water": [0.0, 0.1, 0.2]}
