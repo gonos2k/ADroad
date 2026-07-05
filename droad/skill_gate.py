@@ -31,7 +31,12 @@ class SkillError(ValueError):
 
 
 def _as_series(name: str, x) -> np.ndarray:
-    a = np.asarray(x, dtype=float)
+    # reject bool/str/bytes/object arrays BEFORE float coercion, matching the scalar
+    # policy (True->1.0, "1.0"->1.0 would otherwise pass silently as a metric series).
+    arr = np.asarray(x)
+    if arr.dtype.kind not in ("i", "u", "f"):
+        raise SkillError(f"{name} must be a numeric array, not bool/string/object")
+    a = arr.astype(float)
     if a.ndim != 1:
         raise SkillError(f"{name} must be 1-D, got ndim {a.ndim}")
     if a.size == 0:
@@ -134,8 +139,10 @@ def aggregate_metrics(metrics_list) -> dict:
         if r < 0.0:
             raise SkillError(f"metrics_list[{i}].rmse must be non-negative")
         rmses.append(r)
+        if "freeze_thaw_accuracy" not in m:      # don't silently average in a fake 0.0
+            raise SkillError(f"metrics_list[{i}] missing freeze_thaw_accuracy")
         acc = _finite_scalar(f"metrics_list[{i}].freeze_thaw_accuracy",
-                             m.get("freeze_thaw_accuracy", 0.0))
+                             m["freeze_thaw_accuracy"])
         if not (0.0 <= acc <= 1.0):          # it's a fraction; a public caller could pass 2.0
             raise SkillError(f"metrics_list[{i}].freeze_thaw_accuracy must be in [0, 1]")
         ft.append(acc)
@@ -293,16 +300,26 @@ def _require_columns(row):
     # deviation report) — counts are whole non-negative, errors non-negative, and
     # freeze_thaw_accuracy a fraction — so no corrupted row is silently serialized.
     _int_count("row[n]", row["n"])
-    _int_count("row[cold_n]", row["cold_n"])
+    cold_n = _int_count("row[cold_n]", row["cold_n"])
     for c in ("rmse", "mae"):
         if _finite_scalar(f"row[{c}]", row[c]) < 0.0:
             raise SkillError(f"row[{c}] must be non-negative")
     acc = _finite_scalar("row[freeze_thaw_accuracy]", row["freeze_thaw_accuracy"])
     if not (0.0 <= acc <= 1.0):
         raise SkillError("row[freeze_thaw_accuracy] must be in [0, 1]")
-    if row["cold_rmse"] is not None:            # cold_rmse is None when no cold obs
+    # cold_rmse ↔ cold_n consistency (matches forecast_metrics: None iff no cold obs)
+    if cold_n == 0 and row["cold_rmse"] is not None:
+        raise SkillError("row[cold_rmse] must be None when cold_n == 0")
+    if cold_n > 0:
+        if row["cold_rmse"] is None:
+            raise SkillError("row[cold_rmse] required when cold_n > 0")
         if _finite_scalar("row[cold_rmse]", row["cold_rmse"]) < 0.0:
             raise SkillError("row[cold_rmse] must be non-negative")
+    # model/gate are report labels: must be non-empty strings (so a blank/None
+    # doesn't produce an anonymous, un-attributable row).
+    for c in ("model", "gate"):
+        if not str(row[c]).strip():
+            raise SkillError(f"row[{c}] must be a non-empty string")
 
 
 def skill_report_csv(rows) -> str:

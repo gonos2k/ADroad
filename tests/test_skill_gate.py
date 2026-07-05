@@ -25,6 +25,13 @@ def test_forecast_metrics_cold_subset():
     assert m["cold_rmse"] == pytest.approx(1.0)      # |-2 - -3| = 1
 
 
+def test_forecast_metrics_rejects_nonnumeric_series():
+    with pytest.raises(SkillError):              # bool array is not a metric series
+        forecast_metrics([True, False], [0.0, 1.0])
+    with pytest.raises(SkillError):              # string array coerces silently otherwise
+        forecast_metrics(["1.0", "2.0"], [1.0, 2.0])
+
+
 def test_forecast_metrics_rejects_nonfinite_thresholds():
     with pytest.raises(SkillError):              # NaN freeze_thr fakes accuracy ~1.0
         forecast_metrics([1.0, 2.0], [1.0, 2.0], freeze_thr=float("nan"))
@@ -124,6 +131,8 @@ def test_aggregate_metrics():
         aggregate_metrics([])                           # empty
     with pytest.raises(SkillError):
         aggregate_metrics([{"mae": 0.1}])               # missing rmse
+    with pytest.raises(SkillError):                     # missing freeze_thaw_accuracy (no fake 0.0)
+        aggregate_metrics([{"rmse": 0.2}])
 
 
 def test_degradation_ratio():
