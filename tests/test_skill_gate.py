@@ -226,6 +226,13 @@ def test_promotion_gate_validates_inputs():
                        deviation={**dev, "max_primary_residual": float("nan")})
 
 
+def test_skill_gate_baseline_dev_requires_deviation():
+    base_dev = {"max_primary_residual": 0.0, "diagnostic_steps_rate": 0.0,
+                "over_melt_count": 0, "overflow_count": 0}
+    with pytest.raises(SkillError):              # baseline_deviation alone is silently ignored -> flag it
+        skill_gate({"rmse": 0.2}, {"rmse": 5.0}, baseline_deviation=base_dev)
+
+
 def test_promotion_gate_baseline_dev_requires_deviation():
     base_dev = {"max_primary_residual": 0.0, "diagnostic_steps_rate": 0.0,
                 "over_melt_count": 0, "overflow_count": 0}

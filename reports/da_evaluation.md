@@ -25,3 +25,5 @@ calibration window = [2000, 2200) · valid obs 200개(missing masked) · evaluat
 ## Full-run audit (전체 rollout, residual = 코드 누출 게이트 P0)
 - default: residual=1.735e-18 (PASS) · over_melt=0 · overflow=0 · diag_rate=0.0065
 - DA: residual=1.735e-18 (PASS) · over_melt=0 · overflow=0 · diag_rate=0.0065
+
+기계가독 메타데이터(gate 결과·holdout_interval·holdout residual/rate·one_step_persistence_rmse)는 `da_evaluation_meta.json` 참조.

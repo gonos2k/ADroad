@@ -229,6 +229,8 @@ def main():
                      f"({'PASS' if dv['max_primary_residual'] < 1e-9 else 'FAIL'}) · "
                      f"over_melt={dv['over_melt_count']} · overflow={dv['overflow_count']} · "
                      f"diag_rate={dv['diagnostic_steps_rate']:.4f}")
+    lines += ["", "기계가독 메타데이터(gate 결과·holdout_interval·holdout residual/rate·"
+              "one_step_persistence_rmse)는 `da_evaluation_meta.json` 참조."]
     (outdir / "da_evaluation.md").write_text("\n".join(lines) + "\n", encoding="utf-8")
     (outdir / "da_evaluation.csv").write_text(buf.getvalue(), encoding="utf-8")
     # machine-readable metadata sidecar: reference metrics + window provenance so a

@@ -179,6 +179,10 @@ def skill_gate(candidate: dict, baseline: dict, *, deviation=None, baseline_devi
     # intended (API misuse), so reject rather than honor it.
     if rmse_worse_frac < 0.0 or rate_worse_abs < 0.0:
         raise SkillError("gate tolerances/slacks must be non-negative")
+    # baseline_deviation is only consulted inside the `deviation` block, so passing it
+    # alone silently does nothing — flag the likely caller mistake (matches promotion_gate).
+    if baseline_deviation is not None and deviation is None:
+        raise SkillError("baseline_deviation requires deviation")
     reasons = []
     if c_rmse > b_rmse * (1.0 + rmse_worse_frac):
         reasons.append(f"forecast RMSE {c_rmse:.4f} worse than baseline {b_rmse:.4f}")
