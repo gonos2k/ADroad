@@ -50,6 +50,10 @@ def forecast_metrics(pred, obs, *, freeze_thr: float = 0.0, cold_thr: float = 0.
     - cold_rmse / cold_n: rmse restricted to genuinely cold observations
       (obs < cold_thr); cold_rmse is None if there are none.
     """
+    # thresholds must be finite: a NaN freeze_thr makes every (x>=nan) False, faking
+    # freeze_thaw_accuracy ~1.0; a NaN cold_thr silently empties the cold subset.
+    freeze_thr = _finite_scalar("freeze_thr", freeze_thr)
+    cold_thr = _finite_scalar("cold_thr", cold_thr)
     p = _as_series("pred", pred)
     o = _as_series("obs", obs)
     if p.shape != o.shape:
@@ -285,12 +289,20 @@ def _require_columns(row):
     missing = set(_COLUMNS) - set(row)
     if missing:
         raise SkillError(f"skill row missing columns: {sorted(missing, key=str)}")
-    # numeric columns must be finite scalars (same bar as the deviation report) —
-    # so a stray rmse="bad" / freeze_thaw_accuracy=2.0 can't be silently serialized.
-    for c in ("n", "rmse", "mae", "freeze_thaw_accuracy", "cold_n"):
-        _finite_scalar(f"row[{c}]", row[c])
+    # numeric columns must not just be finite but semantically valid (same bar as the
+    # deviation report) — counts are whole non-negative, errors non-negative, and
+    # freeze_thaw_accuracy a fraction — so no corrupted row is silently serialized.
+    _int_count("row[n]", row["n"])
+    _int_count("row[cold_n]", row["cold_n"])
+    for c in ("rmse", "mae"):
+        if _finite_scalar(f"row[{c}]", row[c]) < 0.0:
+            raise SkillError(f"row[{c}] must be non-negative")
+    acc = _finite_scalar("row[freeze_thaw_accuracy]", row["freeze_thaw_accuracy"])
+    if not (0.0 <= acc <= 1.0):
+        raise SkillError("row[freeze_thaw_accuracy] must be in [0, 1]")
     if row["cold_rmse"] is not None:            # cold_rmse is None when no cold obs
-        _finite_scalar("row[cold_rmse]", row["cold_rmse"])
+        if _finite_scalar("row[cold_rmse]", row["cold_rmse"]) < 0.0:
+            raise SkillError("row[cold_rmse] must be non-negative")
 
 
 def skill_report_csv(rows) -> str:

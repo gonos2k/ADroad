@@ -25,6 +25,13 @@ def test_forecast_metrics_cold_subset():
     assert m["cold_rmse"] == pytest.approx(1.0)      # |-2 - -3| = 1
 
 
+def test_forecast_metrics_rejects_nonfinite_thresholds():
+    with pytest.raises(SkillError):              # NaN freeze_thr fakes accuracy ~1.0
+        forecast_metrics([1.0, 2.0], [1.0, 2.0], freeze_thr=float("nan"))
+    with pytest.raises(SkillError):              # NaN cold_thr silently empties cold subset
+        forecast_metrics([1.0, 2.0], [1.0, 2.0], cold_thr=float("inf"))
+
+
 def test_forecast_metrics_defensive():
     with pytest.raises(SkillError):
         forecast_metrics([1.0, 2.0], [1.0])          # length mismatch
@@ -292,3 +299,9 @@ def test_skill_report_serialization():
         skill_report_csv([bad])
     with pytest.raises(SkillError):
         skill_report_markdown([{**row, "freeze_thaw_accuracy": float("nan")}])
+    with pytest.raises(SkillError):
+        skill_report_csv([{**row, "rmse": -0.1}])     # error must be non-negative
+    with pytest.raises(SkillError):
+        skill_report_csv([{**row, "freeze_thaw_accuracy": 2.0}])   # fraction in [0,1]
+    with pytest.raises(SkillError):
+        skill_report_csv([{**row, "n": 1.5}])         # count must be whole
