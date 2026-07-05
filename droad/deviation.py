@@ -47,6 +47,8 @@ def _max_storage_jump(out, n_steps: int) -> float:
         seq = out.get(k)
         if seq is None:
             continue
+        if isinstance(seq, (str, bytes, ABCMapping, set, frozenset)):
+            raise LedgerError(f"{k} trajectory must be an ordered numeric sequence")
         try:
             L = len(seq)
         except TypeError:
@@ -81,10 +83,11 @@ def deviation_budget(out, case_id: str = "case") -> dict:
             raise LedgerError(f"deviation_budget needs '{key}' — run full_rollout(return_ledger=True)")
     ledgers = out["ledger"]
     diag_per_step = out["diagnostics"]
-    if isinstance(ledgers, ABCMapping) or isinstance(diag_per_step, ABCMapping):
-        # a mapping is sized+iterable, so it would pass len()/iteration and its keys
-        # could look like per-step data — reject it as a wrong container explicitly.
-        raise LedgerError("ledger/diagnostics must be per-step sequences, not mappings")
+    # both must be ORDERED per-step sequences: a mapping/set/str is sized+iterable
+    # and would pass len()/iteration on the wrong thing (keys, chars, unordered).
+    for nm, seq in (("ledger", ledgers), ("diagnostics", diag_per_step)):
+        if isinstance(seq, (ABCMapping, set, frozenset, str, bytes)):
+            raise LedgerError(f"{nm} must be an ordered per-step sequence, not {type(seq).__name__}")
     try:
         n_steps = len(ledgers)
         lengths_ok = n_steps == len(diag_per_step)
@@ -112,7 +115,7 @@ def deviation_budget(out, case_id: str = "case") -> dict:
 
     per_code = {code: int(counts.get(code, 0)) for code in sorted(DIAGNOSTIC_CODES)}
     return {
-        "case_id": case_id,
+        "case_id": str(case_id),                # normalize report identifier
         "n_steps": n_steps,
         "max_primary_residual": max_resid,
         "n_diagnostics_total": int(sum(counts.values())),
@@ -129,6 +132,10 @@ def deviation_budget(out, case_id: str = "case") -> dict:
 def accounting_gate(summary: dict, residual_atol: float = 1e-9) -> tuple[bool, list[str]]:
     """P0 accounting gate. Diagnostics are NOT failures — only the mass residual
     and (structurally-guaranteed) code validity gate here. Returns (passed, reasons)."""
+    if not isinstance(summary, ABCMapping):
+        raise LedgerError("summary must be a mapping from deviation_budget")
+    if "max_primary_residual" not in summary:
+        raise LedgerError("summary missing max_primary_residual")
     residual_atol = as_finite_float("residual_atol", residual_atol)   # NaN would false-PASS
     if residual_atol < 0.0:
         raise LedgerError("residual_atol must be non-negative")

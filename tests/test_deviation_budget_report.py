@@ -136,6 +136,26 @@ def test_serialization_rejects_bad_summary():
         budget_to_markdown([{"case_id": "x"}])
 
 
+def test_accounting_gate_rejects_bad_summary_container():
+    with pytest.raises(LedgerError):
+        accounting_gate(None)                            # not a mapping
+    with pytest.raises(LedgerError):
+        accounting_gate({})                              # missing max_primary_residual
+
+
+def test_budget_rejects_set_and_string_containers():
+    with pytest.raises(LedgerError):                     # top-level diagnostics as set
+        deviation_budget({"ledger": _clean(1), "diagnostics": {("ice_over_melt",)}})
+    with pytest.raises(LedgerError):                     # ledger as string
+        deviation_budget({"ledger": "xx", "diagnostics": [(), ()]})
+
+
+def test_budget_rejects_mapping_storage_trajectory():
+    with pytest.raises(LedgerError):
+        deviation_budget({"ledger": _clean(2), "diagnostics": [(), ()],
+                          "Water": {0: 0.0, 1: 0.1}})    # mapping, not sequence
+
+
 def test_budget_serialization():
     b = deviation_budget({"ledger": _clean(3),
                           "diagnostics": [(), ("ice_over_melt",), ()]}, case_id="c2")
