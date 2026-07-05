@@ -21,10 +21,11 @@ import csv
 import io
 import math
 from collections import Counter
+from collections.abc import Mapping as ABCMapping
 
 from .ledger import (
     DIAGNOSTIC_CODES, LedgerError, StorageLedger,
-    _as_finite_float, _normalize_diagnostics,
+    as_finite_float, normalize_diagnostics,
 )
 
 _STORAGES = ("Snow", "Water", "Ice", "Ice2", "Dep")
@@ -34,17 +35,35 @@ _OVER_MELT = ("snow_over_melt", "ice_over_melt")
 _OVERFLOW = ("snow_overflow", "ice_overflow", "deposit_overflow", "water_overflow")
 
 
-def _max_storage_jump(out) -> float:
-    """Largest |x[i+1]-x[i]| across the 5 storage trajectories (0.0 if absent)."""
+def _max_storage_jump(out, n_steps: int) -> float:
+    """Largest |x[i+1]-x[i]| across the 5 storage trajectories (0.0 if all absent).
+
+    Each present trajectory must be a sized sequence of length n_steps with only
+    finite scalar values — otherwise the jump would be computed on a mismatched
+    timeline or silently skip a NaN, so both fail with LedgerError.
+    """
     jump = 0.0
     for k in _STORAGES:
         seq = out.get(k)
         if seq is None:
             continue
-        for i in range(1, len(seq)):
-            d = abs(float(seq[i]) - float(seq[i - 1]))
-            if not math.isfinite(d):        # NaN/Inf storage must fail, not be skipped
-                raise LedgerError(f"{k} has non-finite storage value near step {i}")
+        try:
+            L = len(seq)
+        except TypeError:
+            raise LedgerError(f"{k} trajectory must be a sized sequence") from None
+        if L != n_steps:
+            raise LedgerError(f"{k} length {L} != n_steps {n_steps}")
+        vals = []
+        for i, x in enumerate(seq):          # validate every value, incl. length-1
+            try:
+                v = float(x)
+            except (TypeError, ValueError):
+                raise LedgerError(f"{k} has non-scalar storage value at step {i}") from None
+            if not math.isfinite(v):
+                raise LedgerError(f"{k} has non-finite storage value at step {i}")
+            vals.append(v)
+        for i in range(1, len(vals)):
+            d = abs(vals[i] - vals[i - 1])
             if d > jump:
                 jump = d
     return jump
@@ -55,15 +74,20 @@ def deviation_budget(out, case_id: str = "case") -> dict:
 
     Requires the audit keys ("ledger", "diagnostics"); raises LedgerError otherwise.
     """
+    if not isinstance(out, ABCMapping):
+        raise LedgerError("deviation_budget input must be a full_rollout(return_ledger=True) mapping")
     for key in ("ledger", "diagnostics"):
         if key not in out:
             raise LedgerError(f"deviation_budget needs '{key}' — run full_rollout(return_ledger=True)")
     ledgers = out["ledger"]
     diag_per_step = out["diagnostics"]
-    if len(ledgers) != len(diag_per_step):
+    try:
+        n_steps = len(ledgers)
+        lengths_ok = n_steps == len(diag_per_step)
+    except TypeError:
+        raise LedgerError("ledger and diagnostics must be sized sequences") from None
+    if not lengths_ok:
         raise LedgerError("ledger and diagnostics lengths differ")
-
-    n_steps = len(ledgers)
     if n_steps == 0:                        # empty rollout = "cannot evaluate", not PASS
         raise LedgerError("deviation_budget requires at least one step")
     max_resid = 0.0
@@ -77,7 +101,7 @@ def deviation_budget(out, case_id: str = "case") -> dict:
     counts = Counter()
     diagnostic_steps = 0
     for step in diag_per_step:              # same validation as StorageResult/rollout_audit
-        codes = _normalize_diagnostics(step)   # None/str/mapping/set/unknown -> LedgerError
+        codes = normalize_diagnostics(step)    # None/str/mapping/set/unknown -> LedgerError
         if codes:
             diagnostic_steps += 1
         counts.update(codes)
@@ -93,7 +117,7 @@ def deviation_budget(out, case_id: str = "case") -> dict:
         "over_melt_count": sum(per_code[c] for c in _OVER_MELT),
         "overflow_count": sum(per_code[c] for c in _OVERFLOW),
         "negative_pre_clamp_count": sum(per_code[c] for c in _NEG_PRE_CLAMP),
-        "max_storage_jump": _max_storage_jump(out),
+        "max_storage_jump": _max_storage_jump(out, n_steps),
         "counts": per_code,
     }
 
@@ -101,13 +125,15 @@ def deviation_budget(out, case_id: str = "case") -> dict:
 def accounting_gate(summary: dict, residual_atol: float = 1e-9) -> tuple[bool, list[str]]:
     """P0 accounting gate. Diagnostics are NOT failures — only the mass residual
     and (structurally-guaranteed) code validity gate here. Returns (passed, reasons)."""
-    residual_atol = _as_finite_float("residual_atol", residual_atol)   # NaN would false-PASS
+    residual_atol = as_finite_float("residual_atol", residual_atol)   # NaN would false-PASS
     if residual_atol < 0.0:
         raise LedgerError("residual_atol must be non-negative")
+    max_resid = as_finite_float("summary.max_primary_residual", summary["max_primary_residual"])
+    if max_resid < 0.0:
+        raise LedgerError("summary.max_primary_residual must be non-negative")
     reasons = []
-    if summary["max_primary_residual"] > residual_atol:
-        reasons.append(
-            f"max_primary_residual {summary['max_primary_residual']:.3e} > {residual_atol:.0e}")
+    if max_resid > residual_atol:
+        reasons.append(f"max_primary_residual {max_resid:.3e} > {residual_atol:.0e}")
     return (not reasons), reasons
 
 

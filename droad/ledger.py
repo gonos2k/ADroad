@@ -66,6 +66,17 @@ class LedgerError(ValueError):
     """Raised on missing/unknown ledger keys."""
 
 
+def as_finite_float(name: str, value) -> float:
+    """Public alias of the finite-float coercion — a cross-module validation
+    contract (used by droad.deviation as well)."""
+    return _as_finite_float(name, value)
+
+
+def normalize_diagnostics(diagnostics) -> tuple:
+    """Public alias of the diagnostics normalizer — shared validation contract."""
+    return _normalize_diagnostics(diagnostics)
+
+
 def _normalize_diagnostics(diagnostics) -> tuple:
     """Normalize & validate a diagnostics collection (shared by StorageResult and
     rollout_audit_to_dict): a bare string becomes a 1-tuple, every code must be a

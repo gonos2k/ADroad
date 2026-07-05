@@ -86,6 +86,33 @@ def test_budget_rejects_bad_diagnostic_step_shape():
         deviation_budget({"ledger": _clean(1), "diagnostics": [("nope",)]})
 
 
+def test_budget_rejects_non_mapping_and_bad_shapes():
+    with pytest.raises(LedgerError):
+        deviation_budget(None)                           # not a mapping
+    with pytest.raises(LedgerError):
+        deviation_budget([1, 2, 3])
+    with pytest.raises(LedgerError):                     # ledger/diagnostics not sized
+        deviation_budget({"ledger": 5, "diagnostics": 5})
+
+
+def test_budget_rejects_storage_length_mismatch():
+    out = {"ledger": _clean(3), "diagnostics": [(), (), ()],
+           "Water": [0.0, 0.1]}                          # len 2 != n_steps 3
+    with pytest.raises(LedgerError):
+        deviation_budget(out)
+
+
+def test_budget_rejects_len1_nonfinite_storage():
+    out = {"ledger": _clean(1), "diagnostics": [()], "Snow": [float("inf")]}
+    with pytest.raises(LedgerError):                     # length-1 non-finite must fail
+        deviation_budget(out)
+
+
+def test_accounting_gate_rejects_nonfinite_summary():
+    with pytest.raises(LedgerError):
+        accounting_gate({"max_primary_residual": float("nan")})
+
+
 def test_budget_serialization():
     b = deviation_budget({"ledger": _clean(3),
                           "diagnostics": [(), ("ice_over_melt",), ()]}, case_id="c2")
