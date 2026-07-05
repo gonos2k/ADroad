@@ -100,10 +100,14 @@ def build_multi(k0_first, n_windows, window=WINDOW, lead=LEAD, bg_w=BG_WEIGHT):
     the reference forward ONCE (not re-spinning per window). Windows with too few
     valid obs are skipped. Returns the list of per-window result dicts."""
     m, objs, jnp, dd, jm, fit = _setup()
+    mi = objs[0]
+    avail = min(len(mi.TSurfObs), len(mi.Tair), len(mi.time))
     span = window + lead
     _advance(m, objs, 0, k0_first)
     results, cursor = [], k0_first
     for _ in range(n_windows):
+        if cursor + span > avail:             # out of data -> stop cleanly (not a fatal error)
+            break
         static, forc, phy_d, x_b, tso = _span(dd, objs, jnp, cursor, span)
         try:
             results.append(_da_cycle(jm, fit, jnp, static, forc, phy_d, x_b, tso,
