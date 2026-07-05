@@ -1,0 +1,4 @@
+model,rmse,mae,freeze_thaw_accuracy,max_primary_residual,diagnostic_steps_rate,over_melt_count,overflow_count,gate
+persistence,6.379721914286672,5.710068367517092,0.2726363181590795,,,,,baseline
+default,0.1508434652330266,0.10827422402434175,0.9964982491245623,0.0,0.003,0,0,PASS
+DA(Emiss=0.995),0.147252460262171,0.1126559747181825,0.9969984992496248,0.0,0.003,0,0,PASS

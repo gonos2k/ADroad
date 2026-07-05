@@ -14,4 +14,5 @@ __all__ = [
     "jax_model", "jax_storage",              # differentiable backend
     "assimilate", "dual",                    # DA / calibration
     "deviation",                             # deviation-budget aggregation
+    "skill_gate",                            # forecast skill gate
 ]

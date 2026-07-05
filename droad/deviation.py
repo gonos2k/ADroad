@@ -81,6 +81,10 @@ def deviation_budget(out, case_id: str = "case") -> dict:
             raise LedgerError(f"deviation_budget needs '{key}' — run full_rollout(return_ledger=True)")
     ledgers = out["ledger"]
     diag_per_step = out["diagnostics"]
+    if isinstance(ledgers, ABCMapping) or isinstance(diag_per_step, ABCMapping):
+        # a mapping is sized+iterable, so it would pass len()/iteration and its keys
+        # could look like per-step data — reject it as a wrong container explicitly.
+        raise LedgerError("ledger/diagnostics must be per-step sequences, not mappings")
     try:
         n_steps = len(ledgers)
         lengths_ok = n_steps == len(diag_per_step)
@@ -142,7 +146,16 @@ _COLUMNS = ("case_id", "n_steps", "max_primary_residual", "n_diagnostics_total",
             "negative_pre_clamp_count", "max_storage_jump")
 
 
+def _require_columns(s):
+    if not isinstance(s, ABCMapping):
+        raise LedgerError("summary must be a mapping")
+    missing = set(_COLUMNS) - set(s)
+    if missing:
+        raise LedgerError(f"summary missing columns: {sorted(missing, key=str)}")
+
+
 def _fmt(s, c):
+    """Human-facing formatting (Markdown only). CSV keeps raw values."""
     if c == "max_primary_residual":
         return f"{s[c]:.3e}"
     if c in ("diagnostic_steps_rate", "max_storage_jump"):
@@ -151,13 +164,15 @@ def _fmt(s, c):
 
 
 def budget_to_csv(summaries) -> str:
-    """CSV (flat columns) via csv.writer, so a case_id with a comma/newline is
-    quoted rather than corrupting the row."""
+    """Machine-readable CSV: RAW values (full precision), via csv.writer so a
+    case_id with a comma/newline is quoted rather than corrupting the row.
+    Use budget_to_markdown for human-facing rounded values."""
     buf = io.StringIO()
     w = csv.writer(buf)
     w.writerow(_COLUMNS)
     for s in summaries:
-        w.writerow([_fmt(s, c) for c in _COLUMNS])
+        _require_columns(s)
+        w.writerow([s[c] for c in _COLUMNS])       # raw, not _fmt -> no precision loss
     return buf.getvalue()
 
 
@@ -174,6 +189,7 @@ def budget_to_markdown(summaries, title: str = "Deviation Budget") -> str:
              "residual = 코드 누출 게이트(P0, ~0 필수). diagnostics = 물리/deviation 신호(카운트, 실패 아님).",
              "", head, sep]
     for s in summaries:
+        _require_columns(s)
         lines.append("| " + " | ".join(_md_cell(_fmt(s, c)) for c in _COLUMNS) + " |")
     lines += ["", "## P0 accounting gate"]
     for s in summaries:

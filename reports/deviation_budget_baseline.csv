@@ -1,2 +1,2 @@
 case_id,n_steps,max_primary_residual,n_diagnostics_total,diagnostic_steps_rate,over_melt_count,overflow_count,negative_pre_clamp_count,max_storage_jump
-no_coupling_baseline,12959,4.441e-16,56,0.0043,0,0,56,0.1006
+no_coupling_baseline,12959,4.440892098500626e-16,56,0.004321321089590246,0,0,56,0.10056902498475942

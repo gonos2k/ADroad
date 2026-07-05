@@ -113,6 +113,29 @@ def test_accounting_gate_rejects_nonfinite_summary():
         accounting_gate({"max_primary_residual": float("nan")})
 
 
+def test_budget_rejects_top_level_diagnostics_mapping():
+    from droad.ledger import DIAG_SNOW_OVERFLOW
+    with pytest.raises(LedgerError):                     # mapping, not per-step sequence
+        deviation_budget({"ledger": _clean(1), "diagnostics": {DIAG_SNOW_OVERFLOW: 1}})
+
+
+def test_csv_keeps_raw_precision():
+    b = deviation_budget({"ledger": _clean(3),
+                          "diagnostics": [(), ("ice_over_melt",), ()]}, case_id="c2")
+    csv = budget_to_csv([b])
+    # rate 1/3 must appear at full precision, not rounded to 0.3333
+    assert repr(1 / 3) in csv or str(1 / 3) in csv
+    md = budget_to_markdown([b])
+    assert "0.3333" in md                                # markdown stays human-rounded
+
+
+def test_serialization_rejects_bad_summary():
+    with pytest.raises(LedgerError):
+        budget_to_csv([{"case_id": "x"}])                # missing columns
+    with pytest.raises(LedgerError):
+        budget_to_markdown([{"case_id": "x"}])
+
+
 def test_budget_serialization():
     b = deviation_budget({"ledger": _clean(3),
                           "diagnostics": [(), ("ice_over_melt",), ()]}, case_id="c2")
