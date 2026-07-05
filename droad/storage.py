@@ -11,6 +11,7 @@ Precip phase codes (input): 0 none, 1 rain, 2 sleet, 3 snow,
 
 from __future__ import annotations
 
+from collections import defaultdict
 from dataclasses import dataclass, replace
 
 from .branches import guarded_exp
@@ -220,7 +221,7 @@ def snow_storage(s: Surf, wearF, MaxPormms, DTSecs, cp) -> StorageResult:
     snowtype, wetfrozen = s.SnowType, s.WetSnowFrozen
     before = _primary(wat, snow, ice, dep)
     ice2_in = ice2
-    tr = {}                                       # internal transfer amounts (per branch)
+    tr = defaultdict(float)                                       # internal transfer amounts (per branch)
     ext_src = ext_sink = 0.0                       # external in/out (per branch)
     diag = []                                      # feasibility diagnostics (not mass)
     freeze_event = melt_event = False
@@ -238,13 +239,13 @@ def snow_storage(s: Surf, wearF, MaxPormms, DTSecs, cp) -> StorageResult:
         snowtype = DRY
 
     if snow > 0.0 and dep > 0.0:        # deposit under snow -> ice
-        tr["deposit_to_ice"] = tr.get("deposit_to_ice", 0.0) + dep
+        tr["deposit_to_ice"] += dep
         ice += dep
         dep = 0.0
 
     if snow > 0.0:
         if cp["forceSnowMelting"]:
-            tr["snow_to_water"] = tr.get("snow_to_water", 0.0) + snow
+            tr["snow_to_water"] += snow
             melt_event = True
             wat += snow
             snow = 0.0
@@ -252,14 +253,14 @@ def snow_storage(s: Surf, wearF, MaxPormms, DTSecs, cp) -> StorageResult:
             amt = 1000.0 * (s.Q2Melt * DTSecs) / (cp["WatMHeat"] * cp["WatDens"])
             if amt > snow:                          # energy-unlimited (reference quirk)
                 diag.append(DIAG_SNOW_OVER_MELT)
-            tr["snow_to_water"] = tr.get("snow_to_water", 0.0) + amt
+            tr["snow_to_water"] += amt
             melt_event = True
             snow -= amt
             wat += amt
 
     if s.WearSurf and snow > 0.0:       # wear: snow -> ice (conserved) + wear loss (external)
         gain = cp["Snow2IceFac"] * wearF.SnowTran
-        tr["snow_to_ice"] = tr.get("snow_to_ice", 0.0) + gain
+        tr["snow_to_ice"] += gain
         ext_sink += wearF.SnowTran - gain           # snow removed beyond what ice gained
         snow -= wearF.SnowTran
         ice += gain
@@ -267,14 +268,14 @@ def snow_storage(s: Surf, wearF, MaxPormms, DTSecs, cp) -> StorageResult:
 
     if snow > 0.0 and snowtype == WET:
         if watsnowrat > cp["WetSnowMeltR"]:
-            tr["snow_to_water"] = tr.get("snow_to_water", 0.0) + snow
+            tr["snow_to_water"] += snow
             melt_event = True
             wat += snow
             snow = 0.0
             snowtype = DRY
         if s.TsurfAve < cp["TLimFreeze"]:
-            tr["snow_to_ice"] = tr.get("snow_to_ice", 0.0) + snow
-            tr["water_to_ice"] = tr.get("water_to_ice", 0.0) + wat
+            tr["snow_to_ice"] += snow
+            tr["water_to_ice"] += wat
             freeze_event = True
             ice += snow + wat
             ice2 += snow + wat
@@ -312,13 +313,13 @@ def ice_storage(s: Surf, wearF, DTSecs, cp) -> StorageResult:
     wat, snow, ice, ice2 = s.SrfWat, s.SrfSnow, s.SrfIce, s.SrfIce2
     before = _primary(wat, snow, ice, s.SrfDep)
     ice2_in = ice2
-    tr = {}
+    tr = defaultdict(float)
     ext_src = ext_sink = ice2_reset = 0.0
     diag = []
     freeze_event = melt_event = False
 
     if s.TsurfAve < cp["TLimFreeze"] and wat > 0.0:     # freezing (water -> ice)
-        tr["water_to_ice"] = tr.get("water_to_ice", 0.0) + wat
+        tr["water_to_ice"] += wat
         freeze_event = True
         ice += wat
         ice2 += wat
@@ -326,7 +327,7 @@ def ice_storage(s: Surf, wearF, DTSecs, cp) -> StorageResult:
 
     if snow <= 0.0 and ice > 0.0:                        # melting (snow-free)
         if cp["forceIceMelting"]:
-            tr["ice_to_water"] = tr.get("ice_to_water", 0.0) + ice
+            tr["ice_to_water"] += ice
             melt_event = True
             wat += ice
             ice = 0.0
@@ -336,7 +337,7 @@ def ice_storage(s: Surf, wearF, DTSecs, cp) -> StorageResult:
             amt = 1000.0 * (s.Q2Melt * DTSecs) / (cp["WatMHeat"] * cp["WatDens"])
             if amt > ice:                           # energy-unlimited (reference quirk)
                 diag.append(DIAG_ICE_OVER_MELT)
-            tr["ice_to_water"] = tr.get("ice_to_water", 0.0) + amt
+            tr["ice_to_water"] += amt
             melt_event = True
             ice -= amt
             ice2 -= amt
@@ -376,7 +377,7 @@ def deposit_storage(s: Surf, DepWear, cp) -> StorageResult:
     """Deposit (black ice) storage step (Storage.DepositStorage). Returns StorageResult."""
     wat, snow, dep = s.SrfWat, s.SrfSnow, s.SrfDep
     before = _primary(wat, snow, s.SrfIce, dep)
-    tr = {}
+    tr = defaultdict(float)
     ext_src = ext_sink = 0.0
     diag = []
     deposit_melt_event = False
@@ -385,7 +386,7 @@ def deposit_storage(s: Surf, DepWear, cp) -> StorageResult:
         ext_src += -s.EvapmmTS
         dep -= s.EvapmmTS
     if s.TsurfAve > cp["TLimMeltDep"]:   # melting -> water (internal)
-        tr["deposit_to_water"] = tr.get("deposit_to_water", 0.0) + dep
+        tr["deposit_to_water"] += dep
         deposit_melt_event = True
         wat += dep
         dep = 0.0
@@ -402,7 +403,7 @@ def deposit_storage(s: Surf, DepWear, cp) -> StorageResult:
         ext_src += dep - old
     if dep > cp["MaxDepmms"]:            # overflow -> water (internal transfer)
         diag.append(DIAG_DEPOSIT_OVERFLOW)
-        tr["deposit_to_water"] = tr.get("deposit_to_water", 0.0) + (dep - cp["MaxDepmms"])
+        tr["deposit_to_water"] += (dep - cp["MaxDepmms"])
         wat += dep - cp["MaxDepmms"]
         dep = cp["MaxDepmms"]
 
