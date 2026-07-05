@@ -45,15 +45,18 @@ def test_skill_gate_skill_and_audit():
     ok2, reasons2 = skill_gate({"rmse": 6.0}, base)  # worse skill
     assert not ok2 and any("RMSE" in r for r in reasons2)
 
-    dev = {"max_primary_residual": 1e-3, "diagnostic_steps_rate": 0.0, "over_melt_count": 0}
+    dev = {"max_primary_residual": 1e-3, "diagnostic_steps_rate": 0.0,
+           "over_melt_count": 0, "overflow_count": 0}
     ok3, reasons3 = skill_gate(cand, base, deviation=dev)   # skill ok but residual leaks
     assert not ok3 and any("residual" in r for r in reasons3)
 
 
 def test_skill_gate_diagnostics_burden():
     cand, base = {"rmse": 0.2}, {"rmse": 5.0}
-    dev = {"max_primary_residual": 0.0, "diagnostic_steps_rate": 0.10, "over_melt_count": 9}
-    base_dev = {"max_primary_residual": 0.0, "diagnostic_steps_rate": 0.01, "over_melt_count": 0}
+    dev = {"max_primary_residual": 0.0, "diagnostic_steps_rate": 0.10,
+           "over_melt_count": 9, "overflow_count": 0}
+    base_dev = {"max_primary_residual": 0.0, "diagnostic_steps_rate": 0.01,
+                "over_melt_count": 0, "overflow_count": 0}
     ok, reasons = skill_gate(cand, base, deviation=dev, baseline_deviation=base_dev)
     assert not ok
     assert any("diagnostic_steps_rate" in r for r in reasons)
@@ -153,6 +156,41 @@ def test_promotion_gate_blocks_on_residual_and_physics():
     v2, r2 = promotion_gate(n_cases=5, windows_beat_baseline=True,
                             deviation=worse, baseline_deviation=base)
     assert v2 == "REPORT_ONLY" and any("physics" in r for r in r2)
+
+
+def test_skill_gate_gates_overflow_like_diagnostics_delta():
+    # candidate keeps over-melt & rate flat but raises overflow — must FAIL, matching
+    # diagnostics_delta().physics_worse (gate and flag can't disagree).
+    cand, base = {"rmse": 0.2}, {"rmse": 5.0}
+    dev = {"max_primary_residual": 0.0, "diagnostic_steps_rate": 0.01,
+           "over_melt_count": 0, "overflow_count": 7}
+    base_dev = {"max_primary_residual": 0.0, "diagnostic_steps_rate": 0.01,
+                "over_melt_count": 0, "overflow_count": 0}
+    ok, reasons = skill_gate(cand, base, deviation=dev, baseline_deviation=base_dev)
+    assert not ok and any("overflow_count" in r for r in reasons)
+    assert diagnostics_delta(dev, base_dev)["physics_worse"] is True   # both agree
+
+
+def test_skill_gate_rejects_bad_deviation_summary():
+    cand, base = {"rmse": 0.2}, {"rmse": 5.0}
+    with pytest.raises(SkillError):                  # missing overflow_count key
+        skill_gate(cand, base, deviation={"max_primary_residual": 0.0,
+                                          "diagnostic_steps_rate": 0.0, "over_melt_count": 0})
+    with pytest.raises(SkillError):                  # negative burden
+        skill_gate(cand, base, deviation={"max_primary_residual": 0.0,
+                   "diagnostic_steps_rate": 0.0, "over_melt_count": -1, "overflow_count": 0})
+    with pytest.raises(SkillError):                  # not a mapping
+        skill_gate(cand, base, deviation=[1, 2, 3])
+
+
+def test_promotion_gate_rejects_fractional_cases():
+    dev = {"max_primary_residual": 0.0, "diagnostic_steps_rate": 0.0,
+           "over_melt_count": 0, "overflow_count": 0}
+    with pytest.raises(SkillError):                  # 2.9 cases is malformed
+        promotion_gate(n_cases=2.9, windows_beat_baseline=True, deviation=dev)
+    with pytest.raises(SkillError):                  # negative residual = corrupted summary
+        promotion_gate(n_cases=5, windows_beat_baseline=True,
+                       deviation={**dev, "max_primary_residual": -1.0})
 
 
 def test_skill_gate_rejects_negative_slack():

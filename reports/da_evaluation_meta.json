@@ -1,0 +1,15 @@
+{
+  "n_steps": 4000,
+  "cal_window": [
+    2000,
+    2200
+  ],
+  "cal_valid_n": 200,
+  "holdout_n": 1800,
+  "default_emiss": 0.95,
+  "calibrated_emiss": 0.99520934603606,
+  "one_step_persistence_rmse": 0.007768916398685116,
+  "rmse_delta_da_minus_default": 0.0061131155601577,
+  "mae_delta_da_minus_default": 0.010692546511970408,
+  "physics_worse": false
+}

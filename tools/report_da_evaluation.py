@@ -122,12 +122,16 @@ def build(max_steps=None):
     m_one_step = forecast_metrics(obs[:-1], obs[1:])
 
     # two deviation budgets per model: full-run audit (residual = code-leak detector,
-    # whole trajectory) AND holdout-aligned (steps=idx) so the physics burden the gate
-    # weighs comes from the SAME window as the holdout skill — not full-run vs holdout.
+    # whole trajectory) AND holdout-aligned so the physics burden the gate weighs comes
+    # from the SAME window as the holdout skill — not full-run vs holdout. The holdout
+    # window is the CONTIGUOUS interval [first, last] valid-obs step, not only the
+    # obs-valid steps: forecast error is measured at obs times, but the physics burden
+    # accrues at EVERY model step in between, so all of them must count.
+    hold_steps = range(int(idx[0]), int(idx[-1]) + 1)
     dev_def = deviation_budget(out_def, case_id="default")
     dev_da = deviation_budget(out_da, case_id=f"DA(Emiss={cal_emiss:.3f})")
-    dev_def_h = deviation_budget(out_def, case_id="default@holdout", steps=idx)
-    dev_da_h = deviation_budget(out_da, case_id="DA@holdout", steps=idx)
+    dev_def_h = deviation_budget(out_def, case_id="default@holdout", steps=hold_steps)
+    dev_da_h = deviation_budget(out_da, case_id="DA@holdout", steps=hold_steps)
     m_const = forecast_metrics(const_eval, obs_eval)
     m_def = forecast_metrics(np.asarray(out_def["Tsurf"], float)[idx][1:], obs_eval)
     m_da = forecast_metrics(np.asarray(out_da["Tsurf"], float)[idx][1:], obs_eval)
@@ -222,7 +226,18 @@ def main():
                      f"diag_rate={dv['diagnostic_steps_rate']:.4f}")
     (outdir / "da_evaluation.md").write_text("\n".join(lines) + "\n", encoding="utf-8")
     (outdir / "da_evaluation.csv").write_text(buf.getvalue(), encoding="utf-8")
-    print("wrote reports/da_evaluation.{md,csv}")
+    # machine-readable metadata sidecar: reference metrics + window provenance so a
+    # downstream reader can reproduce the baseline argument without parsing Markdown.
+    import json as _json
+    meta = {"n_steps": r["n"], "cal_window": list(r["cal_window"]),
+            "cal_valid_n": r["cal_valid_n"], "holdout_n": r["holdout_n"],
+            "default_emiss": r["def_emiss"], "calibrated_emiss": r["cal_emiss"],
+            "one_step_persistence_rmse": r["one_step_rmse"],
+            "rmse_delta_da_minus_default": r["rmse_delta_vs_default"],
+            "mae_delta_da_minus_default": r["mae_delta_vs_default"],
+            "physics_worse": r["delta"]["physics_worse"]}
+    (outdir / "da_evaluation_meta.json").write_text(_json.dumps(meta, indent=2), encoding="utf-8")
+    print("wrote reports/da_evaluation.{md,csv} + da_evaluation_meta.json")
     for row in rows:
         print(f"  {row['model']:22s} rmse={row['rmse']:.4f} mae={row['mae']:.4f} "
               f"gate_vs_const={row['gate_vs_const']} gate_vs_default={row['gate_vs_default']}")
