@@ -86,8 +86,11 @@ def _run(emiss, n, objs, mi, g, s, a, coup, st, cpm, phy):
         TsurfObsLast=coup.LastTsurfObs, return_ledger=True)
 
 
+K0, NA = 2000, 200      # calibration window [K0, K0+NA); evaluation = valid obs AFTER it
+
+
 def build(max_steps=None):
-    cal_emiss, def_emiss = calibrate_emiss()
+    cal_emiss, def_emiss = calibrate_emiss(k0=K0, na=NA)
     m, objs = build_model()
     mi, mo, phy, g, s, a, coup, st, cpm, _ = objs
     n = st.SimLen - 1 if max_steps is None else min(max_steps, st.SimLen - 1)
@@ -98,44 +101,55 @@ def build(max_steps=None):
 
     tso = np.array(mi.TSurfObs, float)[:n]
     idx = np.flatnonzero(tso > -100.0)
-    idx = idx[-min(2000, len(idx)):]
+    idx = idx[idx >= K0 + NA]            # HOLD OUT the calibration window (no train leakage)
+    if len(idx) < 3:
+        raise RuntimeError(f"holdout too small ({len(idx)}); increase --max-steps beyond {K0 + NA}")
     obs = tso[idx]
     obs_eval = obs[1:]
-    persist_eval = np.full_like(obs_eval, obs[0])
+    # constant-initial baseline: hold the analysis-time obs over the whole lead.
+    # (NOT 1-step persistence obs[t-1], which is degenerate at 30 s resolution —
+    #  RMSE ~0.006 — so it can't gate anything. Named honestly.)
+    const_eval = np.full_like(obs_eval, obs[0])
 
     dev_def = deviation_budget(out_def, case_id="default")
     dev_da = deviation_budget(out_da, case_id=f"DA(Emiss={cal_emiss:.3f})")
-    m_persist = forecast_metrics(persist_eval, obs_eval)
+    m_const = forecast_metrics(const_eval, obs_eval)
     m_def = forecast_metrics(np.asarray(out_def["Tsurf"], float)[idx][1:], obs_eval)
     m_da = forecast_metrics(np.asarray(out_da["Tsurf"], float)[idx][1:], obs_eval)
 
-    g_def = skill_gate(m_def, m_persist, deviation=dev_def)
-    g_da = skill_gate(m_da, m_persist, deviation=dev_da, baseline_deviation=dev_def)
+    g_def = skill_gate(m_def, m_const, deviation=dev_def)
+    g_da_vs_const = skill_gate(m_da, m_const, deviation=dev_da, baseline_deviation=dev_def)
+    g_da_vs_def = skill_gate(m_da, m_def, deviation=dev_da, baseline_deviation=dev_def)
     delta = diagnostics_delta(dev_da, dev_def)
-    return {"n": n, "cal_emiss": cal_emiss, "def_emiss": def_emiss,
-            "persist": m_persist, "def": (m_def, dev_def, g_def),
-            "da": (m_da, dev_da, g_da), "delta": delta}
+    return {"n": n, "holdout_n": len(idx), "cal_window": (K0, K0 + NA),
+            "cal_emiss": cal_emiss, "def_emiss": def_emiss,
+            "const": m_const, "def": (m_def, dev_def, g_def),
+            "da": (m_da, dev_da, g_da_vs_const, g_da_vs_def),
+            "rmse_delta_vs_default": m_da["rmse"] - m_def["rmse"],
+            "mae_delta_vs_default": m_da["mae"] - m_def["mae"], "delta": delta}
 
 
 def _rows(r):
     rows = []
-    def row(model, m, dev, gate):
+    def row(model, m, dev, gate_const, gate_def):
         return {"model": model, "rmse": m["rmse"], "mae": m["mae"],
                 "freeze_thaw_accuracy": m["freeze_thaw_accuracy"],
                 "max_primary_residual": (dev or {}).get("max_primary_residual", ""),
-                "diagnostic_steps_rate": (dev or {}).get("diagnostic_steps_rate", ""),
                 "over_melt_count": (dev or {}).get("over_melt_count", ""),
-                "overflow_count": (dev or {}).get("overflow_count", ""), "gate": gate}
-    rows.append(row("persistence", r["persist"], None, "baseline"))
+                "overflow_count": (dev or {}).get("overflow_count", ""),
+                "gate_vs_const": gate_const, "gate_vs_default": gate_def}
+    rows.append(row("constant_initial", r["const"], None, "baseline", "baseline"))
     m, dev, (ok, why) = r["def"]
-    rows.append(row("default", m, dev, "PASS" if ok else "FAIL — " + "; ".join(why)))
-    m, dev, (ok, why) = r["da"]
-    rows.append(row(f"DA(Emiss={r['cal_emiss']:.3f})", m, dev, "PASS" if ok else "FAIL — " + "; ".join(why)))
+    rows.append(row("default", m, dev, "PASS" if ok else "FAIL — " + "; ".join(why), "baseline"))
+    m, dev, (okc, whyc), (okd, whyd) = r["da"]
+    rows.append(row(f"DA(Emiss={r['cal_emiss']:.3f})", m, dev,
+                    "PASS" if okc else "FAIL — " + "; ".join(whyc),
+                    "PASS" if okd else "FAIL — " + "; ".join(whyd)))
     return rows
 
 
 _COLS = ("model", "rmse", "mae", "freeze_thaw_accuracy", "max_primary_residual",
-         "diagnostic_steps_rate", "over_melt_count", "overflow_count", "gate")
+         "over_melt_count", "overflow_count", "gate_vs_const", "gate_vs_default")
 
 
 def main():
@@ -147,9 +161,17 @@ def main():
     outdir = REPO / "reports"; outdir.mkdir(exist_ok=True)
     head = "| " + " | ".join(_COLS) + " |"
     sep = "| " + " | ".join("---" for _ in _COLS) + " |"
-    lines = [f"# Diagnostics-aware DA evaluation ({r['n']} steps)", "",
-             "skill(RMSE↓) + accounting(residual~0) + physics(diagnostics 부담). "
-             f"default Emiss={r['def_emiss']:.3f}, calibrated Emiss={r['cal_emiss']:.3f}.",
+    c0, c1 = r["cal_window"]
+    lines = [f"# Diagnostics-aware calibrated-parameter evaluation ({r['n']} steps)", "",
+             "**범위 주의**: 이것은 완전한 forecast DA가 아니라, JAX dry model에서 보정한 Emiss를 "
+             "full model에 넣었을 때의 single-fixture 파라미터 민감도 + 진단 리포트다. 평가는 t=0부터 "
+             "전체 trajectory를 다시 도는 free-run(analysis-state forecast 아님)이고, 보정한 Tair bias는 "
+             "full model에 적용하지 않는다(Emiss만).",
+             "",
+             f"calibration window = [{c0}, {c1}) · evaluation = 그 이후 valid obs {r['holdout_n']}개(train 누수 없음). "
+             f"default Emiss={r['def_emiss']:.3f}, calibrated Emiss={r['cal_emiss']:.3f}. "
+             "baseline = constant_initial(분석시각 obs 고정; 1-step persistence는 30s에서 자명해 미사용). "
+             "gate: RMSE만 hard, MAE/freeze-thaw는 report-only.",
              "", head, sep]
     import csv as _csv, io as _io
     buf = _io.StringIO(); w = _csv.writer(buf); w.writerow(_COLS)
@@ -157,7 +179,10 @@ def main():
         lines.append("| " + " | ".join(str(row[c]).replace("|", "\\|") for c in _COLS) + " |")
         w.writerow([row[c] for c in _COLS])
     d = r["delta"]
-    lines += ["", "## Diagnostics delta (DA − default)",
+    lines += ["", "## DA vs default (직접 비교)",
+              f"- Δrmse (DA − default): {r['rmse_delta_vs_default']:+.4f}  ({'개선' if r['rmse_delta_vs_default'] < 0 else '악화'})",
+              f"- Δmae  (DA − default): {r['mae_delta_vs_default']:+.4f}",
+              "", "## Diagnostics delta (DA − default)",
               f"- Δover_melt_count: {d['delta_over_melt_count']}",
               f"- Δoverflow_count: {d['delta_overflow_count']}",
               f"- Δdiagnostic_steps_rate: {d['delta_diagnostic_steps_rate']:.4f}",
@@ -166,9 +191,9 @@ def main():
     (outdir / "da_evaluation.csv").write_text(buf.getvalue(), encoding="utf-8")
     print("wrote reports/da_evaluation.{md,csv}")
     for row in rows:
-        print(f"  {row['model']:22s} rmse={row['rmse']:.4f} ft_acc={row['freeze_thaw_accuracy']:.4f} "
-              f"gate={row['gate']}")
-    print(f"  physics_worse(DA vs default): {d['physics_worse']}")
+        print(f"  {row['model']:22s} rmse={row['rmse']:.4f} mae={row['mae']:.4f} "
+              f"gate_vs_const={row['gate_vs_const']} gate_vs_default={row['gate_vs_default']}")
+    print(f"  Δrmse(DA−default)={r['rmse_delta_vs_default']:+.4f}  physics_worse={d['physics_worse']}")
 
 
 if __name__ == "__main__":

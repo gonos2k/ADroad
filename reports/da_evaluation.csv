@@ -1,4 +1,4 @@
-model,rmse,mae,freeze_thaw_accuracy,max_primary_residual,diagnostic_steps_rate,over_melt_count,overflow_count,gate
-persistence,6.379721914286672,5.710068367517092,0.2726363181590795,,,,,baseline
-default,0.1508434652330266,0.10827422402434175,0.9964982491245623,0.0,0.003,0,0,PASS
-DA(Emiss=0.995),0.147252460262171,0.1126559747181825,0.9969984992496248,0.0,0.003,0,0,PASS
+model,rmse,mae,freeze_thaw_accuracy,max_primary_residual,over_melt_count,overflow_count,gate_vs_const,gate_vs_default
+constant_initial,2.5839228454067205,1.9617176209005003,0.7398554752640356,,,,baseline,baseline
+default,0.14937350130788926,0.10573691837129533,0.9977765425236242,1.734723475976807e-18,0,0,PASS,baseline
+DA(Emiss=0.995),0.15548661686804696,0.11642946488326573,0.9983324068927182,1.734723475976807e-18,0,0,PASS,FAIL — forecast RMSE 0.1555 worse than baseline 0.1494

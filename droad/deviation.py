@@ -42,6 +42,7 @@ def _max_storage_jump(out, n_steps: int) -> float:
     timeline or silently skip a NaN, so both fail with LedgerError.
     """
     jump = 0.0
+    key, step, signed = "", -1, 0.0          # provenance of the max jump (which storage/step/direction)
     for k in _STORAGES:
         seq = out.get(k)
         if seq is None:
@@ -57,10 +58,11 @@ def _max_storage_jump(out, n_steps: int) -> float:
         # same numeric policy as ledger fields: rejects str/bool/non-scalar/NaN/Inf
         vals = [as_finite_float(f"{k}[{i}]", x) for i, x in enumerate(seq)]
         for i in range(1, len(vals)):
-            d = abs(vals[i] - vals[i - 1])
-            if d > jump:
-                jump = d
-    return jump
+            d = vals[i] - vals[i - 1]
+            if abs(d) > jump:
+                jump, key, step, signed = abs(d), k, i, d
+    return {"max_storage_jump": jump, "max_storage_jump_key": key,
+            "max_storage_jump_step": step, "max_storage_jump_signed": signed}
 
 
 def deviation_budget(out, case_id: str = "case") -> dict:
@@ -106,7 +108,7 @@ def deviation_budget(out, case_id: str = "case") -> dict:
         counts.update(codes)
 
     per_code = {code: int(counts.get(code, 0)) for code in sorted(DIAGNOSTIC_CODES)}
-    return {
+    summary = {
         "case_id": str(case_id),                # normalize report identifier
         "n_steps": n_steps,
         "max_primary_residual": max_resid,
@@ -116,9 +118,10 @@ def deviation_budget(out, case_id: str = "case") -> dict:
         "over_melt_count": sum(per_code[c] for c in _OVER_MELT),
         "overflow_count": sum(per_code[c] for c in _OVERFLOW),
         "negative_pre_clamp_count": sum(per_code[c] for c in _NEG_PRE_CLAMP),
-        "max_storage_jump": _max_storage_jump(out, n_steps),
         "counts": per_code,
     }
+    summary.update(_max_storage_jump(out, n_steps))    # jump + key/step/signed provenance
+    return summary
 
 
 def accounting_gate(summary: dict, residual_atol: float = 1e-9) -> tuple[bool, list[str]]:
@@ -142,10 +145,14 @@ def accounting_gate(summary: dict, residual_atol: float = 1e-9) -> tuple[bool, l
 
 _COLUMNS = ("case_id", "n_steps", "max_primary_residual", "n_diagnostics_total",
             "diagnostic_steps_rate", "over_melt_count", "overflow_count",
-            "negative_pre_clamp_count", "max_storage_jump")
+            "negative_pre_clamp_count", "max_storage_jump",
+            "max_storage_jump_key", "max_storage_jump_step", "max_storage_jump_signed")
 
+# per-diagnostic-code breakdown columns (machine-readable CSV appends these)
+_DIAG_COLUMNS = tuple(f"diag_{c}" for c in sorted(DIAGNOSTIC_CODES))
 
-_NUMERIC_COLUMNS = tuple(c for c in _COLUMNS if c != "case_id")
+# non-numeric columns: case_id (string) and the jump provenance key (storage name)
+_NUMERIC_COLUMNS = tuple(c for c in _COLUMNS if c not in ("case_id", "max_storage_jump_key"))
 
 
 def _require_columns(s):
@@ -154,6 +161,8 @@ def _require_columns(s):
     missing = set(_COLUMNS) - set(s)
     if missing:
         raise LedgerError(f"summary missing columns: {sorted(missing, key=str)}")
+    if not isinstance(s.get("counts"), ABCMapping):
+        raise LedgerError("summary missing per-code 'counts' mapping")
     for c in _NUMERIC_COLUMNS:          # numeric columns must be finite scalars
         as_finite_float(f"summary[{c}]", s[c])
 
@@ -162,21 +171,23 @@ def _fmt(s, c):
     """Human-facing formatting (Markdown only). CSV keeps raw values."""
     if c == "max_primary_residual":
         return f"{s[c]:.3e}"
-    if c in ("diagnostic_steps_rate", "max_storage_jump"):
+    if c in ("diagnostic_steps_rate", "max_storage_jump", "max_storage_jump_signed"):
         return f"{s[c]:.4f}"
     return str(s[c])
 
 
 def budget_to_csv(summaries) -> str:
-    """Machine-readable CSV: RAW values (full precision), via csv.writer so a
-    case_id with a comma/newline is quoted rather than corrupting the row.
-    Use budget_to_markdown for human-facing rounded values."""
+    """Machine-readable CSV: RAW values (full precision) + per-code diagnostic
+    breakdown columns, via csv.writer so a case_id with a comma/newline is quoted
+    rather than corrupting the row. Use budget_to_markdown for rounded values."""
     buf = io.StringIO()
     w = csv.writer(buf)
-    w.writerow(_COLUMNS)
+    w.writerow(_COLUMNS + _DIAG_COLUMNS)
     for s in summaries:
         _require_columns(s)
-        w.writerow([s[c] for c in _COLUMNS])       # raw, not _fmt -> no precision loss
+        counts = s["counts"]
+        w.writerow([s[c] for c in _COLUMNS]
+                   + [int(counts.get(c, 0)) for c in sorted(DIAGNOSTIC_CODES)])
     return buf.getvalue()
 
 
@@ -200,4 +211,15 @@ def budget_to_markdown(summaries, title: str = "Deviation Budget") -> str:
         ok, reasons = accounting_gate(s)
         status = "PASS" if ok else "FAIL — " + "; ".join(reasons)
         lines.append(f"- {_md_cell(s['case_id'])}: {status}")
+
+    # per-code diagnostic breakdown: only the codes that actually fired anywhere
+    active = [c for c in sorted(DIAGNOSTIC_CODES)
+              if any(int(s["counts"].get(c, 0)) for s in summaries)]
+    if active:
+        lines += ["", "## Diagnostic breakdown (counts)",
+                  "| case_id | " + " | ".join(active) + " |",
+                  "| --- | " + " | ".join("---" for _ in active) + " |"]
+        for s in summaries:
+            lines.append("| " + _md_cell(s["case_id"]) + " | "
+                         + " | ".join(str(int(s["counts"].get(c, 0))) for c in active) + " |")
     return "\n".join(lines) + "\n"

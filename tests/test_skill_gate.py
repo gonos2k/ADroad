@@ -3,7 +3,7 @@ import pytest
 
 from droad.skill_gate import (
     SkillError, forecast_metrics, skill_gate, skill_report_csv, skill_report_markdown,
-    diagnostics_delta,
+    diagnostics_delta, aggregate_metrics, degradation_ratio, promotion_gate,
 )
 
 
@@ -67,6 +67,24 @@ def test_skill_gate_rejects_bad_metrics():
         skill_gate(None, {"rmse": 1.0})
 
 
+def test_skill_gate_rejects_nan_rmse():
+    with pytest.raises(SkillError):                  # NaN rmse would false-PASS the > comparison
+        skill_gate({"rmse": float("nan")}, {"rmse": 0.2})
+    with pytest.raises(SkillError):
+        skill_gate({"rmse": 0.2}, {"rmse": float("inf")})
+    dev = {"max_primary_residual": float("nan"), "diagnostic_steps_rate": 0.0,
+           "over_melt_count": 0, "overflow_count": 0}
+    with pytest.raises(SkillError):                  # NaN residual would false-PASS
+        skill_gate({"rmse": 0.2}, {"rmse": 5.0}, deviation=dev)
+
+
+def test_diagnostics_delta_rejects_nonfinite_values():
+    base = {"max_primary_residual": 0.0, "diagnostic_steps_rate": 0.0,
+            "over_melt_count": 0, "overflow_count": 0}
+    with pytest.raises(SkillError):
+        diagnostics_delta({**base, "over_melt_count": float("nan")}, base)
+
+
 def test_diagnostics_delta():
     base = {"max_primary_residual": 0.0, "diagnostic_steps_rate": 0.01,
             "over_melt_count": 0, "overflow_count": 0}
@@ -81,6 +99,60 @@ def test_diagnostics_delta():
     assert d2["physics_worse"] is False
     with pytest.raises(SkillError):
         diagnostics_delta(None, base)
+
+
+def test_aggregate_metrics():
+    ms = [{"rmse": 0.2, "freeze_thaw_accuracy": 0.99},
+          {"rmse": 0.4, "freeze_thaw_accuracy": 0.97},
+          {"rmse": 0.3, "freeze_thaw_accuracy": 0.98}]
+    a = aggregate_metrics(ms)
+    assert a["n_windows"] == 3
+    assert a["rmse_mean"] == pytest.approx(0.3)
+    assert a["rmse_max"] == pytest.approx(0.4)          # worst window
+    assert a["rmse_min"] == pytest.approx(0.2)
+    with pytest.raises(SkillError):
+        aggregate_metrics([])                           # empty
+    with pytest.raises(SkillError):
+        aggregate_metrics([{"mae": 0.1}])               # missing rmse
+
+
+def test_degradation_ratio():
+    assert degradation_ratio(0.4, 0.2) == pytest.approx(2.0)   # holdout 2x worse -> overfit signal
+    assert degradation_ratio(0.2, 0.2) == pytest.approx(1.0)
+    with pytest.raises(SkillError):
+        degradation_ratio(0.4, 0.0)                     # train_rmse must be positive
+    with pytest.raises(SkillError):
+        degradation_ratio(float("nan"), 0.2)
+
+
+def test_promotion_gate_report_only_on_single_case():
+    dev = {"max_primary_residual": 0.0, "diagnostic_steps_rate": 0.004,
+           "over_melt_count": 0, "overflow_count": 0}
+    # single fixture, all windows beat baseline, clean accounting -> still report-only
+    v, reasons = promotion_gate(n_cases=1, windows_beat_baseline=True, deviation=dev)
+    assert v == "REPORT_ONLY"
+    assert any("insufficient cases" in r for r in reasons)
+
+    # enough cases + all conditions hold -> promote
+    v2, r2 = promotion_gate(n_cases=3, windows_beat_baseline=True, deviation=dev)
+    assert v2 == "PROMOTE" and r2 == []
+
+    # enough cases but a window loses -> report-only
+    v3, r3 = promotion_gate(n_cases=3, windows_beat_baseline=False, deviation=dev)
+    assert v3 == "REPORT_ONLY" and any("every window" in r for r in r3)
+
+
+def test_promotion_gate_blocks_on_residual_and_physics():
+    base = {"max_primary_residual": 0.0, "diagnostic_steps_rate": 0.004,
+            "over_melt_count": 0, "overflow_count": 0}
+    leak = {**base, "max_primary_residual": 1e-3}
+    v, reasons = promotion_gate(n_cases=5, windows_beat_baseline=True, deviation=leak)
+    assert v == "REPORT_ONLY" and any("residual" in r for r in reasons)
+
+    worse = {**base, "over_melt_count": 9}
+    v2, r2 = promotion_gate(n_cases=5, windows_beat_baseline=True,
+                            deviation=worse, baseline_deviation=base)
+    assert v2 == "REPORT_ONLY" and any("physics" in r for r in r2)
 
 
 def test_skill_report_serialization():

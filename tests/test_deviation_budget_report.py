@@ -162,6 +162,29 @@ def test_storage_element_rejects_bool_and_string():
             deviation_budget({"ledger": _clean(2), "diagnostics": [(), ()], "Water": bad})
 
 
+def test_max_storage_jump_provenance():
+    out = {"ledger": _clean(4), "diagnostics": [(), (), (), ()],
+           "Snow": [0.0, 0.1, 0.05, 0.05], "Water": [0.0, 0.0, 0.3, 0.0]}
+    b = deviation_budget(out)
+    assert b["max_storage_jump"] == pytest.approx(0.3)
+    assert b["max_storage_jump_key"] == "Water"
+    assert b["max_storage_jump_step"] == 2            # 0.0 -> 0.3 at index 2
+    assert b["max_storage_jump_signed"] == pytest.approx(0.3)
+    # a later drop 0.3 -> 0.0 has equal magnitude but comes after, so first wins
+    assert b["max_storage_jump_signed"] > 0
+
+
+def test_csv_and_markdown_include_per_code_breakdown():
+    out = {"ledger": _clean(2), "diagnostics": [("snow_over_melt",), ("water_overflow",)]}
+    b = deviation_budget(out, case_id="c")
+    csv = budget_to_csv([b])
+    header = csv.splitlines()[0]
+    assert "diag_snow_over_melt" in header and "diag_water_overflow" in header
+    assert "max_storage_jump_key" in header
+    md = budget_to_markdown([b])
+    assert "Diagnostic breakdown" in md and "snow_over_melt" in md
+
+
 def test_serialization_rejects_nonfinite_numeric_column():
     b = deviation_budget({"ledger": _clean(1), "diagnostics": [()]})
     b = dict(b); b["max_storage_jump"] = float("nan")    # forge a bad numeric column

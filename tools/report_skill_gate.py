@@ -69,20 +69,20 @@ def build_rows():
     # over the whole lead. (1-step persistence is meaningless at 30 s resolution —
     # RMSE ~0.006 — so it can't gate anything; N-step lead is the honest baseline.)
     obs_eval, default_eval = obs[1:], default_pred[1:]
-    persist_eval = np.full_like(obs_eval, obs[0])
+    const_eval = np.full_like(obs_eval, obs[0])
 
     dev = deviation_budget(out, case_id="default")
 
     m_default = forecast_metrics(default_eval, obs_eval)
-    m_persist = forecast_metrics(persist_eval, obs_eval)
-    ok, reasons = skill_gate(m_default, m_persist, deviation=dev)
+    m_const = forecast_metrics(const_eval, obs_eval)
+    ok, reasons = skill_gate(m_default, m_const, deviation=dev)
 
     def row(model, m, gate):
         return {"model": model, "n": m["n"], "rmse": m["rmse"], "mae": m["mae"],
                 "freeze_thaw_accuracy": m["freeze_thaw_accuracy"],
                 "cold_n": m["cold_n"], "cold_rmse": m["cold_rmse"], "gate": gate}
 
-    rows = [row("persistence", m_persist, "baseline"),
+    rows = [row("constant_initial", m_const, "baseline"),
             row("default", m_default, "PASS" if ok else "FAIL — " + "; ".join(reasons))]
     return rows, dev
 
@@ -91,7 +91,9 @@ def main():
     rows, dev = build_rows()
     outdir = REPO / "reports"
     outdir.mkdir(exist_ok=True)
-    md = skill_report_markdown(rows, "Forecast Skill Gate — baseline (default vs persistence)")
+    md = skill_report_markdown(rows, "Forecast Skill Gate — default vs constant_initial baseline")
+    md += ("\nbaseline = constant_initial(분석시각 obs를 lead 전체에 고정). 1-step persistence는 "
+           "30s 해상도에서 RMSE~0.006으로 자명해 gate baseline으로 부적합. gate: RMSE만 hard.\n")
     md += (f"\n## Accounting / deviation (default)\n"
            f"- max_primary_residual: {dev['max_primary_residual']:.3e} "
            f"({'PASS' if dev['max_primary_residual'] < 1e-9 else 'FAIL'})\n"
