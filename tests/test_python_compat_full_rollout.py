@@ -120,7 +120,7 @@ def test_full_rollout_return_ledger_shape():
         surf0=surf0, Albedo0=g.Albedo, BLCond0=a.BLCond,
         NLayers=st.NLayers, DTSecs=st.DTSecs, MaxPormms=phy.MaxPormms, Tph=st.Tph,
         InitLenI=st.InitLenI, phy=_phy(phy), day=_day(st), cp=_cp(cpm), n_steps=n,
-        TsurfObsLast=coup.LastTsurfObs, return_ledger=True)
+        TsurfObsLast=coup.LastTsurfObs, return_ledger=True, return_ledger_detail=True)
 
     assert {"ledger", "ledger_detail", "diagnostics"} <= set(got)
     assert len(got["ledger"]) == n
@@ -130,3 +130,36 @@ def test_full_rollout_return_ledger_shape():
     assert len(got["ledger_detail"][0]) == 2                    # (prec, cond)
     # every full step is mass-consistent (merged residual ~0)
     assert max(abs(lg.primary_mass_residual) for lg in got["ledger"]) < 1e-9
+
+
+def test_full_rollout_ledger_detail_is_opt_in():
+    """return_ledger=True keeps ledger + diagnostics but NOT ledger_detail unless
+    return_ledger_detail=True — the detail is the memory-heavy opt-in (2 extra
+    StorageLedger per step) that the deviation/skill/DA paths never read."""
+    sys.path.insert(0, str(RSP_SRC))
+    m, objs = build_model()
+    mi, mo, phy, g, s, a, coup, st, cpm, _ = objs
+    n = 40
+    hours = np.array([t.hour for t in mi.time[:n]], float)
+    prec_in = np.array(mi.prec, float) / 3600.0 * st.DTSecs
+    surf0 = Surf(SrfWat=s.SrfWatmms, SrfSnow=s.SrfSnowmms, SrfIce=s.SrfIcemms,
+                 SrfIce2=s.SrfIce2mms, SrfDep=s.SrfDepmms, TsurfAve=s.TsurfAve,
+                 Q2Melt=s.Q2Melt, T4Melt=s.T4Melt, WearSurf=s.WearSurf,
+                 SnowType=a.SnowType, WetSnowFrozen=cpm.WetSnowFrozen, VeryCold=s.VeryCold)
+    kw = dict(
+        Tair=np.array(mi.Tair, float), VZ=np.array(mi.VZ, float), Rhz=np.array(mi.Rhz, float),
+        SW=np.array(mi.SW, float), LW=np.array(mi.LW, float),
+        TSurfObs=np.array(mi.TSurfObs, float), hours=hours,
+        prec_phase=np.array(mi.PrecPhase, float), prec_in_tstep=prec_in,
+        Tmp0=g.Tmp, TmpNw0=g.TmpNw, WCont=np.array(g.WCont, float),
+        CC=np.array(g.CC, float), ZDpth=np.array(g.ZDpth, float),
+        DyK=np.array(g.DyK, float), DyC=np.array(g.DyC, float),
+        surf0=surf0, Albedo0=g.Albedo, BLCond0=a.BLCond,
+        NLayers=st.NLayers, DTSecs=st.DTSecs, MaxPormms=phy.MaxPormms, Tph=st.Tph,
+        InitLenI=st.InitLenI, phy=_phy(phy), day=_day(st), cp=_cp(cpm), n_steps=n,
+        TsurfObsLast=coup.LastTsurfObs)
+    lean = full_rollout(**kw, return_ledger=True)                 # default: no detail
+    assert "ledger" in lean and "diagnostics" in lean
+    assert "ledger_detail" not in lean                            # memory saved
+    full = full_rollout(**kw, return_ledger=True, return_ledger_detail=True)
+    assert "ledger_detail" in full and len(full["ledger_detail"]) == n

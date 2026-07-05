@@ -45,30 +45,42 @@ K0, WINDOW, LEAD = 2000, 120, 480      # analysis start, assimilation steps, for
 BG_WEIGHT = 0.05                       # background regularization on the state correction
 
 
-def _spin_and_build(k0, window, lead):
-    """Spin the reference to k0, then build the JAX dry-model static + full-span
-    forcings and the background state x_b at k0. Returns everything the DA needs."""
+def _setup():
+    """Import JAX bits + build the NumPy reference model. Returns shared handles."""
     sys.path.insert(0, str(RSP_SRC))
     from jax import config
     config.update("jax_enable_x64", True)
     import jax.numpy as jnp
     import examples.demo_da as dd       # reuse _static_forc / _phy builders
-
+    from droad import jax_model as jm
+    from droad.assimilate import fit
     m, objs = build_model()
+    return m, objs, jnp, dd, jm, fit
+
+
+def _advance(m, objs, start, count):
+    """Step the NumPy reference forward `count` steps from index `start` (in place)."""
     mi, mo, phy, g, s, a, coup, st, cpm, _ = objs
-    for i in range(k0):                 # spin reference to the analysis window start
+    for i in range(start, start + count):
         m["InputOutput"].SetCurrentValues(i, mi, a, st, s, coup, g)
         m["Storage"].PrecipitationToStorage(st, cpm, mi.PrecPhase[i], a, s)
         m["BalanceModel"].BalanceModelOneStep(mi.SW[i], mi.LW[i], phy, g, s, a, st, coup, mi, i, cpm)
         wf = m["WearingFactors"].WearingFactors(); m["Cond"].WearFactors(cpm, st.Tph, s, wf)
         m["Cond"].RoadCond(phy.MaxPormms, s, a, st, cpm, wf); g.Albedo = m["Cond"].CalcAlbedo(s, cpm)
 
-    span = window + lead
+
+def _span(dd, objs, jnp, k0, span):
+    """Build JAX static + forcings + background state x_b at the CURRENT reference
+    state, for the window [k0, k0+span)."""
+    mi, mo, phy, g, s, a, coup, st, cpm, _ = objs
+    avail = min(len(mi.TSurfObs), len(mi.Tair), len(mi.time))
+    if k0 + span > avail:                 # fail-fast: CLI k0/window/lead can overrun the fixture
+        raise RuntimeError(f"k0+window+lead={k0 + span} exceeds available data {avail}")
     static, forc = dd._static_forc(mi, g, st, slice(k0, k0 + span), np.zeros(span, bool))
     phy_d = dd._phy(phy)
     x_b = (jnp.array(g.Tmp, float), jnp.array(g.TmpNw, float), jnp.float64(a.BLCond))
     tso = np.array(mi.TSurfObs, float)[k0:k0 + span]
-    return jnp, dd, static, forc, phy_d, x_b, tso
+    return static, forc, phy_d, x_b, tso
 
 
 def _slice_forc(forc, a, b):
@@ -76,10 +88,34 @@ def _slice_forc(forc, a, b):
 
 
 def build(k0=K0, window=WINDOW, lead=LEAD, bg_w=BG_WEIGHT):
-    jnp, dd, static, forc, phy_d, x_b, tso = _spin_and_build(k0, window, lead)
-    from droad import jax_model as jm
-    from droad.assimilate import fit
+    """Single-window forecast-DA cycle: spin to k0, then run assimilate->forecast."""
+    m, objs, jnp, dd, jm, fit = _setup()
+    _advance(m, objs, 0, k0)
+    static, forc, phy_d, x_b, tso = _span(dd, objs, jnp, k0, window + lead)
+    return _da_cycle(jm, fit, jnp, static, forc, phy_d, x_b, tso, window, lead, bg_w, k0)
 
+
+def build_multi(k0_first, n_windows, window=WINDOW, lead=LEAD, bg_w=BG_WEIGHT):
+    """Run the forecast-DA cycle on n_windows CONSECUTIVE analysis windows, spinning
+    the reference forward ONCE (not re-spinning per window). Windows with too few
+    valid obs are skipped. Returns the list of per-window result dicts."""
+    m, objs, jnp, dd, jm, fit = _setup()
+    span = window + lead
+    _advance(m, objs, 0, k0_first)
+    results, cursor = [], k0_first
+    for _ in range(n_windows):
+        static, forc, phy_d, x_b, tso = _span(dd, objs, jnp, cursor, span)
+        try:
+            results.append(_da_cycle(jm, fit, jnp, static, forc, phy_d, x_b, tso,
+                                     window, lead, bg_w, cursor))
+        except RuntimeError:
+            pass                              # window without enough valid obs -> not a case
+        _advance(m, objs, cursor, span)       # move reference to the next window start
+        cursor += span
+    return results
+
+
+def _da_cycle(jm, fit, jnp, static, forc, phy_d, x_b, tso, window, lead, bg_w, k0):
     forc_win = _slice_forc(forc, 0, window)
     forc_lead = _slice_forc(forc, window, window + lead)
 
@@ -116,8 +152,10 @@ def build(k0=K0, window=WINDOW, lead=LEAD, bg_w=BG_WEIGHT):
     ol = obs_lead[valid_lead]
     m_da = forecast_metrics(pred_da[valid_lead], ol)
     m_bg = forecast_metrics(pred_bg[valid_lead], ol)
-    # constant_initial baseline: hold the analysis-time obs over the whole lead
-    const = np.full_like(ol, tso[window - 1] if tso[window - 1] > -100.0 else ol[0])
+    # constant_initial baseline: hold the LAST valid obs BEFORE the lead over the
+    # whole forecast (never reach into the lead's future obs -> no leakage).
+    const0 = float(obs_win[valid_win][-1])
+    const = np.full_like(ol, const0)
     m_const = forecast_metrics(const, ol)
 
     # in-sample fit RMSE on the window (train) -> degradation to forecast (holdout)
@@ -129,12 +167,17 @@ def build(k0=K0, window=WINDOW, lead=LEAD, bg_w=BG_WEIGHT):
 
     g_da_vs_bg = skill_gate(m_da, m_bg)          # DA vs no-DA (skill-only; no storages here)
     g_da_vs_const = skill_gate(m_da, m_const)
+    g_bg_vs_const = skill_gate(m_bg, m_const)    # no-DA's OWN gate vs const (not DA's)
+    dx = np.asarray(dx_opt, float)
     return {"k0": k0, "window": window, "lead": lead, "bg_w": bg_w,
             "valid_win": int(valid_win.sum()), "valid_lead": int(valid_lead.sum()),
-            "dx": [float(v) for v in np.asarray(dx_opt)],
+            "dx": [float(v) for v in dx],
+            "dx_l2": float(np.sqrt(np.sum(dx ** 2))), "dx_max_abs": float(np.max(np.abs(dx))),
             "const": m_const, "bg": (m_bg, train_bg), "da": (m_da, train_da),
             "gate_da_vs_bg": g_da_vs_bg, "gate_da_vs_const": g_da_vs_const,
+            "gate_bg_vs_const": g_bg_vs_const,
             "rmse_delta_da_minus_bg": m_da["rmse"] - m_bg["rmse"],
+            "train_delta_da_minus_bg": train_da - train_bg,
             "degradation_da": degradation_ratio(m_da["rmse"], train_da),
             "degradation_bg": degradation_ratio(m_bg["rmse"], train_bg)}
 
@@ -155,7 +198,7 @@ def _rows(r):
     return [
         row("constant_initial", r["const"], None, None, "baseline", "baseline"),
         row("no_DA(background)", m_bg, train_bg, r["degradation_bg"], "baseline",
-            "PASS" if r["gate_da_vs_const"][0] else "—"),
+            "PASS" if r["gate_bg_vs_const"][0] else "FAIL — " + "; ".join(r["gate_bg_vs_const"][1])),
         row("DA(state)", m_da, train_da, r["degradation_da"],
             "PASS" if r["gate_da_vs_bg"][0] else "FAIL — " + "; ".join(r["gate_da_vs_bg"][1]),
             "PASS" if r["gate_da_vs_const"][0] else "FAIL — " + "; ".join(r["gate_da_vs_const"][1])),
@@ -168,11 +211,15 @@ def main():
     ap.add_argument("--window", type=int, default=WINDOW, help="assimilation window steps")
     ap.add_argument("--lead", type=int, default=LEAD, help="forecast lead steps")
     ap.add_argument("--k0", type=int, default=K0, help="analysis window start step")
+    ap.add_argument("--bg-w", type=float, default=BG_WEIGHT, dest="bg_w",
+                    help="background regularization on the state correction")
     args = ap.parse_args()
     for nm, v in (("window", args.window), ("lead", args.lead), ("k0", args.k0)):
         if v <= 0:
             ap.error(f"--{nm} must be positive")
-    r = build(args.k0, args.window, args.lead)
+    if args.bg_w < 0:
+        ap.error("--bg-w must be non-negative")
+    r = build(args.k0, args.window, args.lead, args.bg_w)
     rows = _rows(r)
     outdir = REPO / "reports"; outdir.mkdir(exist_ok=True)
 
@@ -217,8 +264,10 @@ def main():
             "rmse_delta_da_minus_bg": r["rmse_delta_da_minus_bg"],
             "da_train_rmse": r["da"][1], "bg_train_rmse": r["bg"][1],
             "da_degradation_ratio": r["degradation_da"], "bg_degradation_ratio": r["degradation_bg"],
+            "train_delta_da_minus_bg": r["train_delta_da_minus_bg"],
             "da_gate_vs_bg": "PASS" if r["gate_da_vs_bg"][0] else "FAIL",
-            "state_correction_dx": r["dx"]}
+            "bg_gate_vs_const": "PASS" if r["gate_bg_vs_const"][0] else "FAIL",
+            "state_correction_dx": r["dx"], "dx_l2": r["dx_l2"], "dx_max_abs": r["dx_max_abs"]}
     (outdir / "forecast_da_meta.json").write_text(_json.dumps(meta, indent=2), encoding="utf-8")
     print("wrote reports/forecast_da.{md,csv} + forecast_da_meta.json")
     for row in rows:

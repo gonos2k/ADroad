@@ -284,8 +284,10 @@ def storage_result_to_dict(r: StorageResult) -> dict:
 
 
 def rollout_audit_to_dict(out: Mapping) -> dict:
-    """JSON/logging view of a full_rollout(return_ledger=True) audit trail:
-    per-step merged ledger, (prec, cond) detail, and diagnostics."""
+    """JSON/logging view of a full_rollout audit trail: per-step merged ledger,
+    (prec, cond) detail, and diagnostics. Requires the rollout to have been run with
+    BOTH return_ledger=True AND return_ledger_detail=True (the detail is opt-in for
+    memory reasons); otherwise ledger_detail is absent and this raises LedgerError."""
     if not isinstance(out, ABCMapping):
         raise LedgerError("rollout audit must be a mapping from full_rollout(return_ledger=True)")
     missing = {"ledger", "ledger_detail", "diagnostics"} - set(out)

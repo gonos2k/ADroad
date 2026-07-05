@@ -13,11 +13,15 @@
   "bg_train_rmse": 0.3529553857515806,
   "da_degradation_ratio": 0.9541373843496213,
   "bg_degradation_ratio": 0.6261945094922751,
+  "train_delta_da_minus_bg": -0.13470005703181767,
   "da_gate_vs_bg": "PASS",
+  "bg_gate_vs_const": "PASS",
   "state_correction_dx": [
     -0.008449019936176059,
     -0.055203210040975705,
     -0.5863789005551274,
     -0.44078950168126574
-  ]
+  ],
+  "dx_l2": 0.7356999253400591,
+  "dx_max_abs": 0.5863789005551274
 }
