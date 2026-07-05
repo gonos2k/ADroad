@@ -70,6 +70,8 @@ def forecast_metrics(pred, obs, *, freeze_thr: float = 0.0, cold_thr: float = 0.
 def _finite_scalar(name: str, x) -> float:
     if isinstance(x, (bool, np.bool_)):       # numpy bool is also not a metric value
         raise SkillError(f"{name} must be numeric, not bool")
+    if isinstance(x, (str, bytes)):           # "1.0" would float() silently — match ledger policy
+        raise SkillError(f"{name} must be numeric, not string")
     try:
         v = float(x)
     except (TypeError, ValueError):
@@ -105,6 +107,11 @@ def _require_dev_summary(d, name: str) -> dict:
         v = _finite_scalar(f"{name}.{k}", d[k])
         if v < 0.0:
             raise SkillError(f"{name}.{k} must be non-negative")
+        # enforce semantic ranges: counts are whole numbers, a step-rate is a fraction
+        if k in ("over_melt_count", "overflow_count") and int(v) != v:
+            raise SkillError(f"{name}.{k} must be a whole count, got {d[k]!r}")
+        if k == "diagnostic_steps_rate" and v > 1.0:
+            raise SkillError(f"{name}.{k} must be in [0, 1], got {d[k]!r}")
         vals[k] = v
     return vals
 

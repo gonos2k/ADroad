@@ -195,7 +195,7 @@ def test_promotion_gate_rejects_fractional_cases():
 
 def test_skill_gate_rejects_negative_slack():
     cand, base = {"rmse": 0.2}, {"rmse": 5.0}
-    for bad in ("rmse_worse_frac", "rate_worse_abs", "over_melt_worse_abs"):
+    for bad in ("rmse_worse_frac", "rate_worse_abs", "over_melt_worse_abs", "overflow_worse_abs"):
         with pytest.raises(SkillError):          # negative slack silently tightens the gate
             skill_gate(cand, base, **{bad: -0.1})
 
@@ -261,6 +261,20 @@ def test_finite_scalar_rejects_numpy_bool():
     import numpy as np
     with pytest.raises(SkillError):
         skill_gate({"rmse": np.bool_(True)}, {"rmse": 0.2})   # np.bool_ is not a metric
+
+
+def test_finite_scalar_rejects_string_numeric():
+    with pytest.raises(SkillError):              # "1.0" would float() silently — reject like ledger
+        skill_gate({"rmse": "1.0"}, {"rmse": 0.2})
+
+
+def test_require_dev_summary_enforces_count_and_rate_ranges():
+    ok = {"max_primary_residual": 0.0, "diagnostic_steps_rate": 0.0,
+          "over_melt_count": 0, "overflow_count": 0}
+    with pytest.raises(SkillError):              # count must be a whole number
+        skill_gate({"rmse": 0.2}, {"rmse": 5.0}, deviation={**ok, "over_melt_count": 0.5})
+    with pytest.raises(SkillError):              # step-rate is a fraction in [0,1]
+        skill_gate({"rmse": 0.2}, {"rmse": 5.0}, deviation={**ok, "diagnostic_steps_rate": 2.0})
 
 
 def test_skill_report_serialization():

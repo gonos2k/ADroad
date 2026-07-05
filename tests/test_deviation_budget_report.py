@@ -59,6 +59,16 @@ def test_budget_steps_slices_to_holdout_window():
     assert b0["max_storage_jump"] == pytest.approx(0.0)
 
 
+def test_budget_steps_reports_original_jump_step():
+    # jump of 0.5 lands at ORIGINAL rollout step 3 (Water 0.1->0.6); slice steps [2,3,4]
+    out = {"ledger": _clean(5), "diagnostics": [(), (), (), (), ()],
+           "Water": [0.0, 0.05, 0.1, 0.6, 0.62]}
+    b = deviation_budget(out, steps=[2, 3, 4])
+    assert b["max_storage_jump"] == pytest.approx(0.5)
+    assert b["max_storage_jump_key"] == "Water"
+    assert b["max_storage_jump_step"] == 3           # original rollout step, not local index 1
+
+
 def test_budget_steps_validation():
     out = {"ledger": _clean(3), "diagnostics": [(), (), ()],
            "Water": [0.0, 0.1, 0.2]}

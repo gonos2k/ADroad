@@ -48,12 +48,16 @@ def _validate_storage_container(k: str, seq, expected_len: int) -> None:
         raise LedgerError(f"{k} length {L} != expected {expected_len}")
 
 
-def _max_storage_jump(store, n_steps: int) -> dict:
+def _max_storage_jump(store, n_steps: int, step_ids=None) -> dict:
     """Largest |x[i+1]-x[i]| across the 5 storage trajectories (0.0 if all absent).
 
     Each present trajectory must be a sized sequence of length n_steps with only
     finite scalar values — otherwise the jump would be computed on a mismatched
     timeline or silently skip a NaN, so both fail with LedgerError.
+
+    `step_ids` maps local position -> ORIGINAL rollout step so the reported
+    max_storage_jump_step is the true rollout index even on a sliced (steps=) window
+    (None means local index == original, i.e. the full run).
     """
     jump = 0.0
     key, step, signed = "", -1, 0.0          # provenance of the max jump (which storage/step/direction)
@@ -67,7 +71,8 @@ def _max_storage_jump(store, n_steps: int) -> dict:
         for i in range(1, len(vals)):
             d = vals[i] - vals[i - 1]
             if abs(d) > jump:
-                jump, key, step, signed = abs(d), k, i, d
+                orig = step_ids[i] if step_ids is not None else i   # report ORIGINAL rollout step
+                jump, key, step, signed = abs(d), k, orig, d
     return {"max_storage_jump": jump, "max_storage_jump_key": key,
             "max_storage_jump_step": step, "max_storage_jump_signed": signed}
 
@@ -140,8 +145,10 @@ def deviation_budget(out, case_id: str = "case", *, steps=None) -> dict:
     if steps is None:
         sel = range(full_n)
         store_src = out                     # full-run: _max_storage_jump reads out directly
+        step_ids = None                     # local index already == original rollout step
     else:
         sel = _resolve_steps(steps, full_n)
+        step_ids = sel                      # map local jump position -> original rollout step
         # validate ORIGINAL storage containers (against full length) BEFORE integer
         # indexing — otherwise a dict/str trajectory would be silently sliced into a
         # list and bypass the ordered-sequence check _max_storage_jump relies on.
@@ -182,7 +189,7 @@ def deviation_budget(out, case_id: str = "case", *, steps=None) -> dict:
         "negative_pre_clamp_count": sum(per_code[c] for c in _NEG_PRE_CLAMP),
         "counts": per_code,
     }
-    summary.update(_max_storage_jump(store_src, n_steps))   # jump + key/step/signed provenance
+    summary.update(_max_storage_jump(store_src, n_steps, step_ids))   # jump + original-step provenance
     return summary
 
 
