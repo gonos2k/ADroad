@@ -334,6 +334,25 @@ def test_rollout_audit_non_sized_entries_rejected():
         rollout_audit_to_dict({"ledger": 5, "ledger_detail": 5, "diagnostics": 5})
 
 
+def test_diagnostics_set_rejected():
+    from droad.ledger import StorageResult, DIAG_SNOW_OVERFLOW
+    lg = _ledger(1.0, 0.0, 0.0, 1.0)
+    with pytest.raises(LedgerError):                    # set order is non-deterministic
+        StorageResult(object(), lg, {DIAG_SNOW_OVERFLOW})
+
+
+def test_merge_split_tolerances():
+    # continuity gap 0.05, child residuals clean: loose continuity_atol passes,
+    # tight continuity_atol rejects; residual_atol is independent.
+    a = _ledger(0.0, 1.0, 0.0, 1.0)
+    b = _ledger(1.05, 0.0, 0.0, 1.05)                  # before=1.05 vs a.after=1.0 -> 0.05 gap
+    merge_ledgers(a, b, continuity_atol=0.1)           # tolerated
+    with pytest.raises(LedgerError):
+        merge_ledgers(a, b, continuity_atol=1e-9)      # rejected
+    with pytest.raises(LedgerError):                   # bad split tolerance still rejected
+        merge_ledgers(a, b, residual_atol=float("nan"))
+
+
 def test_rollout_audit_to_dict_is_json_serializable():
     import json
     from droad.ledger import rollout_audit_to_dict, DIAG_SNOW_OVERFLOW

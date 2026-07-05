@@ -74,6 +74,8 @@ def _normalize_diagnostics(diagnostics) -> tuple:
         raise LedgerError("diagnostics must be an iterable of codes (or a str), not None")
     if isinstance(diagnostics, ABCMapping):     # a mapping would silently become its keys
         raise LedgerError("diagnostics must be a str or iterable of codes, not a mapping")
+    if isinstance(diagnostics, (set, frozenset)):   # set order is non-deterministic
+        raise LedgerError("diagnostics must be an ordered iterable, not a set")
     try:
         d = (diagnostics,) if isinstance(diagnostics, str) else tuple(diagnostics)
     except TypeError:
@@ -311,7 +313,9 @@ def _or_by_keys(ledgers, keys):
     return {k: any(bool(l.event_flags[k]) for l in ledgers) for k in keys}
 
 
-def merge_ledgers(*ledgers: StorageLedger, atol: float = 1e-9) -> StorageLedger:
+def merge_ledgers(*ledgers: StorageLedger, atol: float = 1e-9,
+                  residual_atol: float | None = None,
+                  continuity_atol: float | None = None) -> StorageLedger:
     """Aggregate child ledgers (P0 §3, no-go #4).
 
     Key rule: do NOT sum child residuals. Recompute the expected primary mass
@@ -319,24 +323,32 @@ def merge_ledgers(*ledgers: StorageLedger, atol: float = 1e-9) -> StorageLedger:
     actual from the LAST child (the final state after all sub-steps).
 
     Fail-fast on child leaks: every child must itself be balanced (|residual| <=
-    atol). Otherwise two children with opposite unaccounted mass (+0.5 / -0.5)
-    could telescope to a clean aggregate and hide the leak. Continuity is also
-    enforced: each child's `primary_after_actual` must equal the next child's
-    `primary_before`, so a reordered or mis-recorded sub-step can't pass silently.
+    residual_atol). Otherwise two children with opposite unaccounted mass
+    (+0.5 / -0.5) could telescope to a clean aggregate and hide the leak.
+    Continuity is enforced separately: each child's `primary_after_actual` must
+    equal the next child's `primary_before` within continuity_atol.
+
+    `atol` sets both tolerances; `residual_atol`/`continuity_atol` override each
+    independently (the two mean different things — accounting leak vs. float
+    join error — and may want to diverge on float32/large-rollout audit paths).
     """
     if not ledgers:
         raise LedgerError("merge_ledgers requires at least one ledger")
     atol = _as_finite_float("merge_ledgers.atol", atol)   # NaN would skip the check
-    if atol < 0.0:
-        raise LedgerError("merge_ledgers.atol must be non-negative")
+    res_atol = atol if residual_atol is None else _as_finite_float(
+        "merge_ledgers.residual_atol", residual_atol)
+    con_atol = atol if continuity_atol is None else _as_finite_float(
+        "merge_ledgers.continuity_atol", continuity_atol)
+    if atol < 0.0 or res_atol < 0.0 or con_atol < 0.0:
+        raise LedgerError("merge_ledgers tolerances must be non-negative")
     for i, lg in enumerate(ledgers):
         if not isinstance(lg, StorageLedger):
             raise LedgerError(f"merge_ledgers child {i} must be StorageLedger, got {type(lg).__name__}")
-        if abs(lg.primary_mass_residual) > atol:
+        if abs(lg.primary_mass_residual) > res_atol:
             raise LedgerError(
                 f"child ledger {i} has non-zero residual: {lg.primary_mass_residual}")
     for a, b in zip(ledgers, ledgers[1:]):
-        if abs(a.primary_after_actual - b.primary_before) > atol:
+        if abs(a.primary_after_actual - b.primary_before) > con_atol:
             raise LedgerError(
                 "non-contiguous ledgers: "
                 f"{a.primary_after_actual} -> {b.primary_before}")

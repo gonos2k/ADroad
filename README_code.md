@@ -63,6 +63,12 @@ pytest -q                     →  전부 통과 (배치 권장: pytest -m "not 
 **fixture 도메인(no-coupling rollout) 내부**에서만 보장된다. 극단 비물리 입력에서
 reference(clip 없음)와 갈라질 수 있다 — exact parity는 정상 기상 범위 주장이다.
 
+## 코드 리뷰 반영 (13차: tolerance 분리 + set 거부)
+`merge_ledgers`가 `residual_atol`/`continuity_atol`을 독립 지정 가능(회계 leak vs float join 오차는 의미가
+달라 float32/대규모 rollout에서 갈릴 수 있음; `atol`은 둘의 공통 기본값, 하위호환 유지). `_normalize_diagnostics`가
+`set`/`frozenset`을 거부(비결정적 순서 방지, 발생 순서 보존). `verify_merged` strict mode는 full_rollout 내부
+구성을 런타임 재계산하는 중복이라 보류(full_step/full_rollout 테스트가 정합 보증). tiny-negative는 유지.
+
 ## 코드 리뷰 반영 (12차: 방어 래핑 마무리)
 `make_ledger`가 mapping을 `dict()`로 미리 변환하지 않고 그대로 넘겨(None 등이 `_check_keys`의 `LedgerError`로
 귀결), `_normalize_diagnostics`가 mapping을 거부(key로 조용히 해석되는 것 방지), `rollout_audit_to_dict`가
