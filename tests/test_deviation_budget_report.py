@@ -43,6 +43,33 @@ def test_budget_counts_diagnostics_and_residual():
     assert b["max_storage_jump"] == pytest.approx(0.3)    # Water 0.0->0.3
 
 
+def test_budget_steps_slices_to_holdout_window():
+    # 4-step run; only step 2 has a diagnostic and the big Water jump is 0.0->0.3 at step 2.
+    diags = [(), (), ("water_overflow",), ()]
+    out = {"ledger": _clean(4), "diagnostics": diags,
+           "Water": [0.0, 0.0, 0.3, 0.31], "Snow": [0.0, 0.0, 0.0, 0.0]}
+    # holdout = steps [2, 3]: the overflow AND the 0.3 jump fall in-window
+    b = deviation_budget(out, case_id="hold", steps=[2, 3])
+    assert b["n_steps"] == 2
+    assert b["overflow_count"] == 1
+    assert b["max_storage_jump"] == pytest.approx(0.01)   # within-window: Water 0.30->0.31
+    # holdout = steps [0, 1]: quiet window, no diagnostics, no jump
+    b0 = deviation_budget(out, case_id="hold0", steps=[0, 1])
+    assert b0["overflow_count"] == 0
+    assert b0["max_storage_jump"] == pytest.approx(0.0)
+
+
+def test_budget_steps_validation():
+    out = {"ledger": _clean(3), "diagnostics": [(), (), ()],
+           "Water": [0.0, 0.1, 0.2]}
+    with pytest.raises(LedgerError):
+        deviation_budget(out, steps=[0, 3])                  # index out of range
+    with pytest.raises(LedgerError):
+        deviation_budget(out, steps=[])                      # selects zero steps
+    with pytest.raises(LedgerError):
+        deviation_budget(out, steps={0: 1})                  # mapping, not ordered indices
+
+
 def test_accounting_gate_pass_and_fail():
     ok_out = {"ledger": _clean(2), "diagnostics": [(), ("snow_overflow",)]}
     ok, reasons = accounting_gate(deviation_budget(ok_out))

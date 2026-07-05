@@ -51,8 +51,15 @@ def calibrate_emiss(k0=2000, na=200, steps=300):
     static, bf = demo_da._static_forc(mi, g, st, slice(k0, k0 + na), np.zeros(na, bool))
     phy_d = demo_da._phy(phy)
     x0 = (jnp.array(g.Tmp, float), jnp.array(g.TmpNw, float), jnp.float64(a.BLCond))
-    obs = jnp.array(np.array(mi.TSurfObs, float)[k0:k0 + na])
-    w = jnp.ones(na)
+    # mask missing obs in the calibration window too (evaluation already does this):
+    # weight=0 on missing (-9999) so the loss never tries to fit sentinel values.
+    obs_np = np.array(mi.TSurfObs, float)[k0:k0 + na]
+    valid = obs_np > -100.0
+    cal_valid_n = int(valid.sum())
+    if cal_valid_n < 3:
+        raise RuntimeError(f"calibration window has too few valid observations ({cal_valid_n})")
+    obs = jnp.array(obs_np)
+    w = jnp.array(valid.astype(float))
     emap = lambda re: 0.85 + 0.15 * jnn.sigmoid(re)      # constrained to physical [0.85, 1.0]
 
     def loss(c):
@@ -61,7 +68,7 @@ def calibrate_emiss(k0=2000, na=200, steps=300):
         return jnp.sum(w * (p - obs) ** 2) / jnp.sum(w) + 5.0 * (e - 0.95) ** 2 + 2.0 * c["bias"] ** 2
 
     est, _ = fit(loss, {"re": jnp.float64(0.0), "bias": jnp.float64(0.0)}, steps=steps, lr=0.03)
-    return float(emap(est["re"])), float(phy.Emiss)
+    return float(emap(est["re"])), float(phy.Emiss), cal_valid_n
 
 
 def _run(emiss, n, objs, mi, g, s, a, coup, st, cpm, phy):
@@ -90,7 +97,7 @@ K0, NA = 2000, 200      # calibration window [K0, K0+NA); evaluation = valid obs
 
 
 def build(max_steps=None):
-    cal_emiss, def_emiss = calibrate_emiss(k0=K0, na=NA)
+    cal_emiss, def_emiss, cal_valid_n = calibrate_emiss(k0=K0, na=NA)
     m, objs = build_model()
     mi, mo, phy, g, s, a, coup, st, cpm, _ = objs
     n = st.SimLen - 1 if max_steps is None else min(max_steps, st.SimLen - 1)
@@ -110,21 +117,32 @@ def build(max_steps=None):
     # (NOT 1-step persistence obs[t-1], which is degenerate at 30 s resolution —
     #  RMSE ~0.006 — so it can't gate anything. Named honestly.)
     const_eval = np.full_like(obs_eval, obs[0])
+    # reference-only: 1-step persistence RMSE on the SAME holdout (predict obs[t] with
+    # obs[t-1]). ~0 at 30 s resolution — documents WHY it's unfit as a gate baseline.
+    m_one_step = forecast_metrics(obs[:-1], obs[1:])
 
+    # two deviation budgets per model: full-run audit (residual = code-leak detector,
+    # whole trajectory) AND holdout-aligned (steps=idx) so the physics burden the gate
+    # weighs comes from the SAME window as the holdout skill — not full-run vs holdout.
     dev_def = deviation_budget(out_def, case_id="default")
     dev_da = deviation_budget(out_da, case_id=f"DA(Emiss={cal_emiss:.3f})")
+    dev_def_h = deviation_budget(out_def, case_id="default@holdout", steps=idx)
+    dev_da_h = deviation_budget(out_da, case_id="DA@holdout", steps=idx)
     m_const = forecast_metrics(const_eval, obs_eval)
     m_def = forecast_metrics(np.asarray(out_def["Tsurf"], float)[idx][1:], obs_eval)
     m_da = forecast_metrics(np.asarray(out_da["Tsurf"], float)[idx][1:], obs_eval)
 
-    g_def = skill_gate(m_def, m_const, deviation=dev_def)
-    g_da_vs_const = skill_gate(m_da, m_const, deviation=dev_da, baseline_deviation=dev_def)
-    g_da_vs_def = skill_gate(m_da, m_def, deviation=dev_da, baseline_deviation=dev_def)
-    delta = diagnostics_delta(dev_da, dev_def)
+    # gates use the HOLDOUT-aligned budget (skill window == diagnostics window)
+    g_def = skill_gate(m_def, m_const, deviation=dev_def_h)
+    g_da_vs_const = skill_gate(m_da, m_const, deviation=dev_da_h, baseline_deviation=dev_def_h)
+    g_da_vs_def = skill_gate(m_da, m_def, deviation=dev_da_h, baseline_deviation=dev_def_h)
+    delta = diagnostics_delta(dev_da_h, dev_def_h)
     return {"n": n, "holdout_n": len(idx), "cal_window": (K0, K0 + NA),
+            "cal_valid_n": cal_valid_n, "one_step_rmse": m_one_step["rmse"],
             "cal_emiss": cal_emiss, "def_emiss": def_emiss,
-            "const": m_const, "def": (m_def, dev_def, g_def),
-            "da": (m_da, dev_da, g_da_vs_const, g_da_vs_def),
+            "const": m_const, "def": (m_def, dev_def_h, g_def),
+            "da": (m_da, dev_da_h, g_da_vs_const, g_da_vs_def),
+            "full_run": {"default": dev_def, "DA": dev_da},
             "rmse_delta_vs_default": m_da["rmse"] - m_def["rmse"],
             "mae_delta_vs_default": m_da["mae"] - m_def["mae"], "delta": delta}
 
@@ -153,10 +171,14 @@ _COLS = ("model", "rmse", "mae", "freeze_thaw_accuracy", "max_primary_residual",
 
 
 def main():
-    max_steps = None
-    if "--max-steps" in sys.argv:
-        max_steps = int(sys.argv[sys.argv.index("--max-steps") + 1])
-    r = build(max_steps)
+    import argparse
+    ap = argparse.ArgumentParser(description="Diagnostics-aware calibrated-parameter evaluation")
+    ap.add_argument("--max-steps", type=int, default=None,
+                    help=f"cap rollout length (must exceed calibration window end {K0 + NA})")
+    args = ap.parse_args()
+    if args.max_steps is not None and args.max_steps <= 0:
+        ap.error("--max-steps must be positive")
+    r = build(args.max_steps)
     rows = _rows(r)
     outdir = REPO / "reports"; outdir.mkdir(exist_ok=True)
     head = "| " + " | ".join(_COLS) + " |"
@@ -168,10 +190,15 @@ def main():
              "전체 trajectory를 다시 도는 free-run(analysis-state forecast 아님)이고, 보정한 Tair bias는 "
              "full model에 적용하지 않는다(Emiss만).",
              "",
-             f"calibration window = [{c0}, {c1}) · evaluation = 그 이후 valid obs {r['holdout_n']}개(train 누수 없음). "
+             f"calibration window = [{c0}, {c1}) · valid obs {r['cal_valid_n']}개(missing masked) · "
+             f"evaluation = 그 이후 valid obs {r['holdout_n']}개(train 누수 없음). "
              f"default Emiss={r['def_emiss']:.3f}, calibrated Emiss={r['cal_emiss']:.3f}. "
-             "baseline = constant_initial(분석시각 obs 고정; 1-step persistence는 30s에서 자명해 미사용). "
+             "baseline = constant_initial(분석시각 obs 고정). "
+             f"참조: 1-step persistence RMSE = {r['one_step_rmse']:.4f}(30s에서 자명 → gate baseline 부적합, gate에 미사용). "
              "gate: RMSE만 hard, MAE/freeze-thaw는 report-only.",
+             "",
+             "표의 residual/over_melt/overflow는 **holdout window 집계**(skill window와 정렬). "
+             "전체 rollout 감사값은 아래 'Full-run audit' 참조.",
              "", head, sep]
     import csv as _csv, io as _io
     buf = _io.StringIO(); w = _csv.writer(buf); w.writerow(_COLS)
@@ -186,7 +213,13 @@ def main():
               f"- Δover_melt_count: {d['delta_over_melt_count']}",
               f"- Δoverflow_count: {d['delta_overflow_count']}",
               f"- Δdiagnostic_steps_rate: {d['delta_diagnostic_steps_rate']:.4f}",
-              f"- physics_worse: {d['physics_worse']}"]
+              f"- physics_worse: {d['physics_worse']}",
+              "", "## Full-run audit (전체 rollout, residual = 코드 누출 게이트 P0)"]
+    for name, dv in r["full_run"].items():
+        lines.append(f"- {name}: residual={dv['max_primary_residual']:.3e} "
+                     f"({'PASS' if dv['max_primary_residual'] < 1e-9 else 'FAIL'}) · "
+                     f"over_melt={dv['over_melt_count']} · overflow={dv['overflow_count']} · "
+                     f"diag_rate={dv['diagnostic_steps_rate']:.4f}")
     (outdir / "da_evaluation.md").write_text("\n".join(lines) + "\n", encoding="utf-8")
     (outdir / "da_evaluation.csv").write_text(buf.getvalue(), encoding="utf-8")
     print("wrote reports/da_evaluation.{md,csv}")

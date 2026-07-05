@@ -89,9 +89,15 @@ def aggregate_metrics(metrics_list) -> dict:
     for i, m in enumerate(metrics_list):
         if not isinstance(m, ABCMapping) or "rmse" not in m:
             raise SkillError(f"metrics_list[{i}] must be a metric mapping with 'rmse'")
-        rmses.append(_finite_scalar(f"metrics_list[{i}].rmse", m["rmse"]))
-        ft.append(_finite_scalar(f"metrics_list[{i}].freeze_thaw_accuracy",
-                                 m.get("freeze_thaw_accuracy", 0.0)))
+        r = _finite_scalar(f"metrics_list[{i}].rmse", m["rmse"])
+        if r < 0.0:
+            raise SkillError(f"metrics_list[{i}].rmse must be non-negative")
+        rmses.append(r)
+        acc = _finite_scalar(f"metrics_list[{i}].freeze_thaw_accuracy",
+                             m.get("freeze_thaw_accuracy", 0.0))
+        if not (0.0 <= acc <= 1.0):          # it's a fraction; a public caller could pass 2.0
+            raise SkillError(f"metrics_list[{i}].freeze_thaw_accuracy must be in [0, 1]")
+        ft.append(acc)
     n = len(rmses)
     return {"n_windows": n, "rmse_mean": sum(rmses) / n, "rmse_max": max(rmses),
             "rmse_min": min(rmses), "freeze_thaw_accuracy_mean": sum(ft) / n}
@@ -134,6 +140,10 @@ def skill_gate(candidate: dict, baseline: dict, *, deviation=None, baseline_devi
     over_melt_worse_abs = _finite_scalar("over_melt_worse_abs", over_melt_worse_abs)
     if c_rmse < 0.0 or b_rmse < 0.0 or residual_atol < 0.0:
         raise SkillError("rmse and residual_atol must be non-negative")
+    # slacks widen the gate; a negative slack silently makes it STRICTER than
+    # intended (API misuse), so reject rather than honor it.
+    if rmse_worse_frac < 0.0 or rate_worse_abs < 0.0 or over_melt_worse_abs < 0.0:
+        raise SkillError("gate tolerances/slacks must be non-negative")
     reasons = []
     if c_rmse > b_rmse * (1.0 + rmse_worse_frac):
         reasons.append(f"forecast RMSE {c_rmse:.4f} worse than baseline {b_rmse:.4f}")
@@ -167,6 +177,10 @@ def diagnostics_delta(candidate_dev, baseline_dev) -> dict:
     for k in _DEV_KEYS:                      # validate values (NaN/str -> SkillError, not bad delta)
         c = _finite_scalar(f"candidate_dev.{k}", candidate_dev.get(k, 0))
         b = _finite_scalar(f"baseline_dev.{k}", baseline_dev.get(k, 0))
+        # residual/rate/counts are magnitudes from a deviation budget: a negative
+        # value means a corrupted summary, not a real burden — reject it.
+        if c < 0.0 or b < 0.0:
+            raise SkillError(f"{k} must be non-negative in a deviation summary")
         delta[f"delta_{k}"] = c - b
     delta["physics_worse"] = bool(
         delta["delta_diagnostic_steps_rate"] > 0
@@ -186,16 +200,26 @@ def promotion_gate(*, n_cases, windows_beat_baseline, deviation=None,
     correctly returns REPORT_ONLY (insufficient cases) — the report-only policy
     is thus an executable gate, not a doc note.
     """
+    # promotion is a high-stakes verdict — validate every input to the same bar as
+    # skill_gate (a string "False" is truthy; a NaN residual would false-PROMOTE).
     n_cases = int(_finite_scalar("n_cases", n_cases))
+    min_cases = int(_finite_scalar("min_cases", min_cases))
+    residual_atol = _finite_scalar("residual_atol", residual_atol)
+    if min_cases <= 0 or residual_atol < 0.0:
+        raise SkillError("min_cases must be positive and residual_atol non-negative")
+    if not isinstance(windows_beat_baseline, (bool, np.bool_)):
+        raise SkillError("windows_beat_baseline must be bool")
     reasons = []
     if n_cases < min_cases:
         reasons.append(f"insufficient cases: {n_cases} < {min_cases} (report-only)")
     if not windows_beat_baseline:
         reasons.append("does not beat baseline in every window")
     if deviation is not None:
-        if deviation["max_primary_residual"] > residual_atol:
-            reasons.append(
-                f"accounting residual {deviation['max_primary_residual']:.3e} > {residual_atol:.0e}")
+        if not isinstance(deviation, ABCMapping) or "max_primary_residual" not in deviation:
+            raise SkillError("deviation must be a summary mapping with max_primary_residual")
+        resid = _finite_scalar("deviation.max_primary_residual", deviation["max_primary_residual"])
+        if resid > residual_atol:
+            reasons.append(f"accounting residual {resid:.3e} > {residual_atol:.0e}")
         if baseline_deviation is not None and diagnostics_delta(deviation, baseline_deviation)["physics_worse"]:
             reasons.append("physics burden worse than baseline")
     return ("PROMOTE" if not reasons else "REPORT_ONLY"), reasons

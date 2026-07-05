@@ -155,6 +155,39 @@ def test_promotion_gate_blocks_on_residual_and_physics():
     assert v2 == "REPORT_ONLY" and any("physics" in r for r in r2)
 
 
+def test_skill_gate_rejects_negative_slack():
+    cand, base = {"rmse": 0.2}, {"rmse": 5.0}
+    for bad in ("rmse_worse_frac", "rate_worse_abs", "over_melt_worse_abs"):
+        with pytest.raises(SkillError):          # negative slack silently tightens the gate
+            skill_gate(cand, base, **{bad: -0.1})
+
+
+def test_diagnostics_delta_rejects_negative_burden():
+    base = {"max_primary_residual": 0.0, "diagnostic_steps_rate": 0.0,
+            "over_melt_count": 0, "overflow_count": 0}
+    with pytest.raises(SkillError):              # a negative count = corrupted summary
+        diagnostics_delta({**base, "over_melt_count": -1}, base)
+
+
+def test_aggregate_metrics_rejects_out_of_range_accuracy():
+    with pytest.raises(SkillError):              # freeze_thaw_accuracy is a fraction in [0,1]
+        aggregate_metrics([{"rmse": 0.2, "freeze_thaw_accuracy": 2.0}])
+    with pytest.raises(SkillError):
+        aggregate_metrics([{"rmse": -0.1, "freeze_thaw_accuracy": 0.5}])
+
+
+def test_promotion_gate_validates_inputs():
+    dev = {"max_primary_residual": 0.0, "diagnostic_steps_rate": 0.0,
+           "over_melt_count": 0, "overflow_count": 0}
+    with pytest.raises(SkillError):              # "False" string is truthy -> must be bool
+        promotion_gate(n_cases=3, windows_beat_baseline="False", deviation=dev)
+    with pytest.raises(SkillError):
+        promotion_gate(n_cases=3, windows_beat_baseline=True, min_cases=0, deviation=dev)
+    with pytest.raises(SkillError):              # NaN residual would false-PROMOTE
+        promotion_gate(n_cases=5, windows_beat_baseline=True,
+                       deviation={**dev, "max_primary_residual": float("nan")})
+
+
 def test_skill_report_serialization():
     row = {"model": "default", "n": 100, "rmse": 1 / 3, "mae": 0.1,
            "freeze_thaw_accuracy": 0.99, "cold_n": 5, "cold_rmse": 0.2, "gate": "PASS"}

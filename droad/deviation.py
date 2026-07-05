@@ -34,7 +34,7 @@ _OVER_MELT = ("snow_over_melt", "ice_over_melt")
 _OVERFLOW = ("snow_overflow", "ice_overflow", "deposit_overflow", "water_overflow")
 
 
-def _max_storage_jump(out, n_steps: int) -> float:
+def _max_storage_jump(store, n_steps: int) -> dict:
     """Largest |x[i+1]-x[i]| across the 5 storage trajectories (0.0 if all absent).
 
     Each present trajectory must be a sized sequence of length n_steps with only
@@ -44,7 +44,7 @@ def _max_storage_jump(out, n_steps: int) -> float:
     jump = 0.0
     key, step, signed = "", -1, 0.0          # provenance of the max jump (which storage/step/direction)
     for k in _STORAGES:
-        seq = out.get(k)
+        seq = store.get(k)
         if seq is None:
             continue
         if isinstance(seq, (str, bytes, ABCMapping, set, frozenset)):
@@ -65,10 +65,33 @@ def _max_storage_jump(out, n_steps: int) -> float:
             "max_storage_jump_step": step, "max_storage_jump_signed": signed}
 
 
-def deviation_budget(out, case_id: str = "case") -> dict:
+def _resolve_steps(steps, full_n: int) -> list:
+    """Validate `steps` into a list of in-range int indices (for holdout-window budgets).
+
+    A holdout skill gate scores only obs-valid steps, so its physics burden should be
+    aggregated on the SAME window — not the full run. steps selects which rollout steps
+    to include; it must be an ordered sequence of ints in [0, full_n)."""
+    if isinstance(steps, (ABCMapping, set, frozenset, str, bytes)):
+        raise LedgerError(f"steps must be an ordered index sequence, not {type(steps).__name__}")
+    try:
+        idx = [int(i) for i in steps]
+    except (TypeError, ValueError):
+        raise LedgerError("steps must be an iterable of integer indices") from None
+    for i in idx:
+        if not (0 <= i < full_n):
+            raise LedgerError(f"steps index {i} out of range [0, {full_n})")
+    if not idx:
+        raise LedgerError("steps selects zero rollout steps — cannot evaluate")
+    return idx
+
+
+def deviation_budget(out, case_id: str = "case", *, steps=None) -> dict:
     """Aggregate one full_rollout(return_ledger=True) result into a budget dict.
 
     Requires the audit keys ("ledger", "diagnostics"); raises LedgerError otherwise.
+    When `steps` is given (an index sequence), the budget is aggregated over ONLY those
+    rollout steps — used to align diagnostics with a holdout forecast window so a
+    skill gate compares like-for-like physics burden (not full-run vs holdout skill).
     """
     if not isinstance(out, ABCMapping):
         raise LedgerError("deviation_budget input must be a full_rollout(return_ledger=True) mapping")
@@ -83,14 +106,25 @@ def deviation_budget(out, case_id: str = "case") -> dict:
         if isinstance(seq, (ABCMapping, set, frozenset, str, bytes)):
             raise LedgerError(f"{nm} must be an ordered per-step sequence, not {type(seq).__name__}")
     try:
-        n_steps = len(ledgers)
-        lengths_ok = n_steps == len(diag_per_step)
+        full_n = len(ledgers)
+        lengths_ok = full_n == len(diag_per_step)
     except TypeError:
         raise LedgerError("ledger and diagnostics must be sized sequences") from None
     if not lengths_ok:
         raise LedgerError("ledger and diagnostics lengths differ")
-    if n_steps == 0:                        # empty rollout = "cannot evaluate", not PASS
+    if full_n == 0:                         # empty rollout = "cannot evaluate", not PASS
         raise LedgerError("deviation_budget requires at least one step")
+
+    if steps is None:
+        sel = range(full_n)
+        store_src = out                     # full-run: _max_storage_jump reads out directly
+    else:
+        sel = _resolve_steps(steps, full_n)
+        # slice storage trajectories to the window; jump is between consecutive SELECTED steps
+        store_src = {k: [out[k][i] for i in sel] for k in _STORAGES if k in out}
+    ledgers = [ledgers[i] for i in sel]
+    diag_per_step = [diag_per_step[i] for i in sel]
+    n_steps = len(ledgers)
     max_resid = 0.0
     for lg in ledgers:
         if not isinstance(lg, StorageLedger):
@@ -120,7 +154,7 @@ def deviation_budget(out, case_id: str = "case") -> dict:
         "negative_pre_clamp_count": sum(per_code[c] for c in _NEG_PRE_CLAMP),
         "counts": per_code,
     }
-    summary.update(_max_storage_jump(out, n_steps))    # jump + key/step/signed provenance
+    summary.update(_max_storage_jump(store_src, n_steps))   # jump + key/step/signed provenance
     return summary
 
 
