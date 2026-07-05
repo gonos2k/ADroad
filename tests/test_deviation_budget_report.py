@@ -60,6 +60,32 @@ def test_budget_requires_audit_keys():
         deviation_budget({"ledger": _clean(1), "diagnostics": [("bogus_code",)]})
 
 
+def test_budget_rejects_empty_rollout():
+    with pytest.raises(LedgerError):                     # empty = cannot evaluate, not PASS
+        deviation_budget({"ledger": [], "diagnostics": []})
+
+
+def test_accounting_gate_rejects_nan_atol():
+    b = deviation_budget({"ledger": _clean(1), "diagnostics": [()]})
+    with pytest.raises(LedgerError):                     # NaN atol would false-PASS
+        accounting_gate(b, residual_atol=float("nan"))
+    with pytest.raises(LedgerError):
+        accounting_gate(b, residual_atol=-1.0)
+
+
+def test_budget_rejects_nonfinite_storage_jump():
+    out = {"ledger": _clean(2), "diagnostics": [(), ()], "Water": [0.0, float("nan")]}
+    with pytest.raises(LedgerError):
+        deviation_budget(out)
+
+
+def test_budget_rejects_bad_diagnostic_step_shape():
+    with pytest.raises(LedgerError):                     # a step must be normalizable
+        deviation_budget({"ledger": _clean(1), "diagnostics": [None]})
+    with pytest.raises(LedgerError):                     # unknown code per step
+        deviation_budget({"ledger": _clean(1), "diagnostics": [("nope",)]})
+
+
 def test_budget_serialization():
     b = deviation_budget({"ledger": _clean(3),
                           "diagnostics": [(), ("ice_over_melt",), ()]}, case_id="c2")
