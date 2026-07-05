@@ -226,6 +226,19 @@ def test_promotion_gate_validates_inputs():
                        deviation={**dev, "max_primary_residual": float("nan")})
 
 
+def test_promotion_gate_baseline_dev_requires_deviation():
+    base_dev = {"max_primary_residual": 0.0, "diagnostic_steps_rate": 0.0,
+                "over_melt_count": 0, "overflow_count": 0}
+    with pytest.raises(SkillError):              # baseline_deviation without deviation = mistake
+        promotion_gate(n_cases=5, windows_beat_baseline=True, baseline_deviation=base_dev)
+
+
+def test_finite_scalar_rejects_numpy_bool():
+    import numpy as np
+    with pytest.raises(SkillError):
+        skill_gate({"rmse": np.bool_(True)}, {"rmse": 0.2})   # np.bool_ is not a metric
+
+
 def test_skill_report_serialization():
     row = {"model": "default", "n": 100, "rmse": 1 / 3, "mae": 0.1,
            "freeze_thaw_accuracy": 0.99, "cold_n": 5, "cold_rmse": 0.2, "gate": "PASS"}

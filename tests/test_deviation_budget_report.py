@@ -68,6 +68,23 @@ def test_budget_steps_validation():
         deviation_budget(out, steps=[])                      # selects zero steps
     with pytest.raises(LedgerError):
         deviation_budget(out, steps={0: 1})                  # mapping, not ordered indices
+    with pytest.raises(LedgerError):
+        deviation_budget(out, steps=[0, 1.9])                # fractional index (no silent trunc)
+    with pytest.raises(LedgerError):
+        deviation_budget(out, steps=[True, 2])               # bool is not an index
+    with pytest.raises(LedgerError):
+        deviation_budget(out, steps=[1, 1])                  # duplicate would double-count
+    with pytest.raises(LedgerError):
+        deviation_budget(out, steps=[2, 0])                  # reversal breaks 'interval' meaning
+
+
+def test_budget_steps_rejects_dict_trajectory_bypass():
+    # a dict trajectory is integer-indexable but NOT an ordered sequence; the steps=
+    # path must reject the original container before slicing, not silently accept it.
+    out = {"ledger": _clean(3), "diagnostics": [(), (), ()],
+           "Water": {0: 0.0, 1: 0.1, 2: 0.2}}
+    with pytest.raises(LedgerError):
+        deviation_budget(out, steps=[0, 1, 2])
 
 
 def test_accounting_gate_pass_and_fail():

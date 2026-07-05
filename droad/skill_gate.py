@@ -68,7 +68,7 @@ def forecast_metrics(pred, obs, *, freeze_thr: float = 0.0, cold_thr: float = 0.
 
 
 def _finite_scalar(name: str, x) -> float:
-    if isinstance(x, bool):
+    if isinstance(x, (bool, np.bool_)):       # numpy bool is also not a metric value
         raise SkillError(f"{name} must be numeric, not bool")
     try:
         v = float(x)
@@ -199,7 +199,11 @@ def skill_gate(candidate: dict, baseline: dict, *, deviation=None, baseline_devi
 def diagnostics_delta(candidate_dev, baseline_dev) -> dict:
     """Diagnostics-aware comparison: how a candidate's physics burden differs from
     a baseline's (e.g. did DA lower RMSE but raise over-melt?). Returns per-key
-    deltas plus `physics_worse` = any burden increased. Missing keys count as 0."""
+    deltas plus `physics_worse` = any burden increased.
+
+    Unlike skill_gate()/promotion_gate() — which require a FULL deviation summary via
+    _require_dev_summary — this helper is deliberately permissive for ad-hoc
+    comparison: a missing burden key counts as 0."""
     for d, nm in ((candidate_dev, "candidate_dev"), (baseline_dev, "baseline_dev")):
         if not isinstance(d, ABCMapping):
             raise SkillError(f"{nm} must be a deviation summary mapping")
@@ -240,6 +244,8 @@ def promotion_gate(*, n_cases, windows_beat_baseline, deviation=None,
         raise SkillError("min_cases must be positive and residual_atol non-negative")
     if not isinstance(windows_beat_baseline, (bool, np.bool_)):
         raise SkillError("windows_beat_baseline must be bool")
+    if baseline_deviation is not None and deviation is None:
+        raise SkillError("baseline_deviation requires deviation")   # likely caller mistake
     reasons = []
     if n_cases < min_cases:
         reasons.append(f"insufficient cases: {n_cases} < {min_cases} (report-only)")

@@ -34,6 +34,20 @@ _OVER_MELT = ("snow_over_melt", "ice_over_melt")
 _OVERFLOW = ("snow_overflow", "ice_overflow", "deposit_overflow", "water_overflow")
 
 
+def _validate_storage_container(k: str, seq, expected_len: int) -> None:
+    """A storage trajectory must be an ORDERED, sized numeric sequence of the given
+    length. Rejecting mapping/str/set here (before any integer indexing) is what stops
+    a dict like {0:.., 1:..} from masquerading as a trajectory on the steps= path."""
+    if isinstance(seq, (str, bytes, ABCMapping, set, frozenset)):
+        raise LedgerError(f"{k} trajectory must be an ordered numeric sequence")
+    try:
+        L = len(seq)
+    except TypeError:
+        raise LedgerError(f"{k} trajectory must be a sized sequence") from None
+    if L != expected_len:
+        raise LedgerError(f"{k} length {L} != expected {expected_len}")
+
+
 def _max_storage_jump(store, n_steps: int) -> dict:
     """Largest |x[i+1]-x[i]| across the 5 storage trajectories (0.0 if all absent).
 
@@ -47,14 +61,7 @@ def _max_storage_jump(store, n_steps: int) -> dict:
         seq = store.get(k)
         if seq is None:
             continue
-        if isinstance(seq, (str, bytes, ABCMapping, set, frozenset)):
-            raise LedgerError(f"{k} trajectory must be an ordered numeric sequence")
-        try:
-            L = len(seq)
-        except TypeError:
-            raise LedgerError(f"{k} trajectory must be a sized sequence") from None
-        if L != n_steps:
-            raise LedgerError(f"{k} length {L} != n_steps {n_steps}")
+        _validate_storage_container(k, seq, n_steps)
         # same numeric policy as ledger fields: rejects str/bool/non-scalar/NaN/Inf
         vals = [as_finite_float(f"{k}[{i}]", x) for i, x in enumerate(seq)]
         for i in range(1, len(vals)):
@@ -65,23 +72,41 @@ def _max_storage_jump(store, n_steps: int) -> dict:
             "max_storage_jump_step": step, "max_storage_jump_signed": signed}
 
 
+def _as_step_index(name: str, x) -> int:
+    """One step index: a WHOLE number, not a bool (True->1 would corrupt a window)
+    and not a float that silently truncates (1.9->1)."""
+    if isinstance(x, bool):
+        raise LedgerError(f"{name} must be an integer index, not bool")
+    try:
+        v = float(x)
+    except (TypeError, ValueError):
+        raise LedgerError(f"{name} must be an integer index, got {x!r}") from None
+    if not v.is_integer():
+        raise LedgerError(f"{name} must be a whole-number index, got {x!r}")
+    return int(v)
+
+
 def _resolve_steps(steps, full_n: int) -> list:
     """Validate `steps` into a list of in-range int indices (for holdout-window budgets).
 
     A holdout skill gate scores only obs-valid steps, so its physics burden should be
-    aggregated on the SAME window — not the full run. steps selects which rollout steps
-    to include; it must be an ordered sequence of ints in [0, full_n)."""
+    aggregated on the SAME window — not the full run. steps must be a STRICTLY
+    INCREASING sequence of whole-number indices in [0, full_n): duplicates would
+    double-count diagnostics/jumps and reversal would break the 'interval' meaning."""
     if isinstance(steps, (ABCMapping, set, frozenset, str, bytes)):
         raise LedgerError(f"steps must be an ordered index sequence, not {type(steps).__name__}")
     try:
-        idx = [int(i) for i in steps]
-    except (TypeError, ValueError):
+        raw = list(steps)
+    except TypeError:
         raise LedgerError("steps must be an iterable of integer indices") from None
+    idx = [_as_step_index(f"steps[{j}]", i) for j, i in enumerate(raw)]
+    if not idx:
+        raise LedgerError("steps selects zero rollout steps — cannot evaluate")
     for i in idx:
         if not (0 <= i < full_n):
             raise LedgerError(f"steps index {i} out of range [0, {full_n})")
-    if not idx:
-        raise LedgerError("steps selects zero rollout steps — cannot evaluate")
+    if any(b <= a for a, b in zip(idx, idx[1:])):
+        raise LedgerError("steps must be strictly increasing (no duplicates or reversal)")
     return idx
 
 
@@ -120,6 +145,12 @@ def deviation_budget(out, case_id: str = "case", *, steps=None) -> dict:
         store_src = out                     # full-run: _max_storage_jump reads out directly
     else:
         sel = _resolve_steps(steps, full_n)
+        # validate ORIGINAL storage containers (against full length) BEFORE integer
+        # indexing — otherwise a dict/str trajectory would be silently sliced into a
+        # list and bypass the ordered-sequence check _max_storage_jump relies on.
+        for k in _STORAGES:
+            if k in out:
+                _validate_storage_container(k, out[k], full_n)
         # slice storage trajectories to the window; jump is between consecutive SELECTED steps
         store_src = {k: [out[k][i] for i in sel] for k in _STORAGES if k in out}
     ledgers = [ledgers[i] for i in sel]

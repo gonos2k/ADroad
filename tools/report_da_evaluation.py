@@ -58,7 +58,9 @@ def calibrate_emiss(k0=2000, na=200, steps=300):
     cal_valid_n = int(valid.sum())
     if cal_valid_n < 3:
         raise RuntimeError(f"calibration window has too few valid observations ({cal_valid_n})")
-    obs = jnp.array(obs_np)
+    # zero out invalid entries so weight=0 * obs never forms 0*NaN (NaN); with a
+    # -9999 sentinel this is belt-and-suspenders, but it's cheap and fully safe.
+    obs = jnp.array(np.where(valid, obs_np, 0.0))
     w = jnp.array(valid.astype(float))
     emap = lambda re: 0.85 + 0.15 * jnn.sigmoid(re)      # constrained to physical [0.85, 1.0]
 
