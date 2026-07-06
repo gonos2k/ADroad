@@ -1,7 +1,7 @@
 # Full-model forecast DA — 확장 설계 (Step 3)
 
 > **Status**: design (구현 전) · **Date**: 2026-07-06
-> **Basis code commit**: `fddee2b` · **Design doc commit**: `2bfd2fb`
+> **Basis code/report commit**: `fddee2b` · **Design doc**: `2bfd2fb` → revision `c6fe484`
 > **참조 리포트 (existing)**: `reports/forecast_da.md`, `reports/forecast_da_multi.md`, `reports/forecast_da_regimes.md`, `reports/forecast_da_grid.md`, `docs/report/dROAD_report.md` §5.4–5.6
 > **참조 리포트 (planned)**: `reports/forecast_da_fullmodel*.md` (설계 A 구현 시 산출)
 
@@ -39,13 +39,18 @@ full model 확장의 본질은 **"$dx$(또는 storage 보정)를 full 모델의 
 
 ### 설계 A — thermal-only 주입 (최소·즉시 구현 가능)
 
+기본형은 **A0(raw-start injection)**다. raw `dx`를 `k0+window`에 직접 더하지 않는다(§5.1 참조).
+
 ```
-1. full NumPy 모델을 분석시각 k0+window 까지 spin → 배경 분석상태(열+저장소 전부)
-2. dry JAX 모델에서 dx 추정 (현재 방식 그대로, 동화창 [k0, k0+window))
-3. 배경 분석상태의 Tmp/TmpNw layers 1:5 에 dx 가산 (저장소는 그대로)
-4. full_rollout(return_ledger=True)로 lead 자유예보 실행 → pred_da_full
-5. 배경 분석상태(무보정)로도 full_rollout → pred_bg_full
-6. 평가: skill_gate(예보 RMSE) + deviation_budget(물리 부담) 둘 다
+A0 (1차 구현):
+1. full NumPy 모델을 k0까지 spin → 배경 k0 상태(열+저장소)
+2. dry JAX 모델에서 raw dx 추정 (동화창 [k0, k0+window))
+3. full k0 상태에 dx 주입 (Tmp/TmpNw 1:5 += dx, TsurfAve 동기화)
+4. full model을 [k0, k0+window+lead) 동안 obs 미삽입 free-run (BG/DA 각각)
+5. lead 구간만 skill_gate + deviation_budget으로 평가
+
+A1 (비교군): dry end-state correction dTmp_end = carry_a - carry_b 를
+            k0+window full state에 주입하고 lead만 free-run (§5.4 note).
 ```
 
 - **장점**: 현재 dry DA와 즉시 연결, 구현 최소, **deviation 감사가 처음으로 forecast DA에 적용**된다. 정직한 첫 질문(열 보정이 full 예보에서 살아남고 물리 부담을 해치지 않는가)에 바로 답한다.
@@ -159,19 +164,28 @@ build_A0(k0, window, lead, bg_w):
     # 평가는 lead 구간(window: 이후)만
     obs = TSurfObs[k0 : k0+window+lead]
     lead_idx = flatnonzero(obs > -100); lead_idx = lead_idx[lead_idx >= window]
+    if len(lead_idx) < 3:
+        raise RuntimeError("forecast lead has too few valid obs")     # dry _da_cycle과 동일 정책
     m_bg = forecast_metrics(out_bg.Tsurf[lead_idx], obs[lead_idx])
     m_da = forecast_metrics(out_da.Tsurf[lead_idx], obs[lead_idx])
 
-    # deviation budget: LOCAL index (out_*는 [0, window+lead) 시계열)
+    # deviation budget: out_*는 [0, window+lead) LOCAL timeline. lead 구간의 local index만 선택
+    # (global k0-기준 index 아님). lead-aligned budget이 primary gate.
     budget_steps = range(int(lead_idx[0]), int(lead_idx[-1]) + 1)
     dev_bg = deviation_budget(out_bg, steps=budget_steps)
     dev_da = deviation_budget(out_da, steps=budget_steps)
+    # (report-only) analysis-window diagnostics — lead 진입 전 보정이 storage 부담을 키웠는지 확인용
+    win_steps = range(0, window)
+    dev_da_win = deviation_budget(out_da, steps=win_steps)            # gate 아님, 기록만
 
-    gate = skill_gate(m_da, m_bg, deviation=dev_da, baseline_deviation=dev_bg)  # skill + 물리부담
-    return {m_bg, m_da, dev_bg, dev_da, gate, dx_l2, physics_worse=diagnostics_delta(dev_da,dev_bg).physics_worse}
+    gate = skill_gate(m_da, m_bg, deviation=dev_da, baseline_deviation=dev_bg)  # skill + 물리부담(lead)
+    return {m_bg, m_da, dev_bg, dev_da, dev_da_win, gate, dx_l2,
+            physics_worse=diagnostics_delta(dev_da, dev_bg).physics_worse}
 ```
 
-> **P1 주의(요약)**: (1) A0/A1 주입 방식을 명시 — raw dx를 k0+window에 직접 더하지 말 것. (2) lead에서 `InitLenI=-1`·sentinel obs로 미래 관측 삽입 차단. (3) `apply_dx`가 `TsurfAve` 동기화 + 상태 격리. (4) lead-only 시계열이므로 `deviation_budget(steps=)`는 **local index**.
+**A1 구현 note(비교군)**: dry DA가 `k0+window`에서 `carry_a`(analysis)와 `carry_b`(background)를 **둘 다** 반환하게 하고, `dTmp_end[1:5] = carry_a.Tmp[1:5] − carry_b.Tmp[1:5]`를 full `k0+window` 상태에 주입한다(raw dx 아님). 그 외 평가는 A0와 동일하되 lead만 free-run.
+
+> **P1 주의(요약)**: (1) A0/A1 주입 방식을 명시 — raw dx를 k0+window에 직접 더하지 말 것(A0=k0 주입 후 window+lead free-run). (2) lead에서 `InitLenI=-1`·sentinel obs로 미래 관측 삽입 차단. (3) `apply_dx`가 `TsurfAve` 동기화 + 상태 격리. (4) out_*는 `[0, window+lead)` **local timeline**이므로 `deviation_budget(steps=)`에는 global이 아니라 lead 구간 **local index**를 넘긴다. (5) `lead_idx < 3`이면 fail-fast. (6) analysis-window diagnostics는 **report-only**, lead-aligned budget이 primary gate.
 
 **평가 축**
 - `gate_vs_bg`: DA 예보가 no-DA를 이기는가 (RMSE hard) **AND** 물리 부담 비악화.
@@ -187,7 +201,7 @@ build_A0(k0, window, lead, bg_w):
 
 **리스크·주의**
 - dx는 dry 모델 loss로 추정되므로 full 모델 최적 보정과 다를 수 있음(설계 B가 이를 해결하나 비용 큼).
-- full spin은 k0+window까지 필요 → 계산량 증가(grid는 슬라이스 누적 실행 유지).
+- **계산량**: A0는 k0까지만 reference spin한 뒤 `window+lead`를 obs 미삽입 full free-run으로 다시 수행하므로, 비용은 `window+lead` 두 예보(BG/DA)에 비례한다. A1은 `k0+window`까지 spin이 필요하다. (grid는 슬라이스 누적 실행 유지.)
 - deviation `steps=`는 lead의 유효 구간(연속 interval)로 집계 — dry의 holdout-aligned 정책 재사용.
 
 ---
