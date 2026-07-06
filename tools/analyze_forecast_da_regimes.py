@@ -50,8 +50,8 @@ def _numeric_feature_names(row):
             if k not in ("k0", "beats_bg") and isinstance(v, (int, float)) and not isinstance(v, bool)]
 
 
-# Three feature families — kept SEPARATE so exogenous regime signals are not mixed
-# with post-hoc difficulty or the DA's own response when ranking separators:
+# Four feature families — kept SEPARATE so exogenous regime signals are not mixed
+# with post-hoc difficulty, background fit, or the DA's own response when ranking:
 #   ex_ante_forcing    : known at forecast issue time (given the forecast forcing)
 #   post_hoc_obs       : computed from the realized lead observations (difficulty, not
 #                        knowable ex ante) — explains WHY a window was hard, not a prior
@@ -84,6 +84,8 @@ def summarize_regimes(results):
     rows = [_features(r) for r in results]
     win = [x for x in rows if x["beats_bg"]]
     lose = [x for x in rows if not x["beats_bg"]]
+    if not win or not lose:          # need BOTH groups; else group means are NaN -> no table
+        return rows, win, lose, []
     table = []
     # delta_rmse IS the (continuous) outcome label -> excluded from separators (circular).
     for f in _numeric_feature_names(rows[0]):

@@ -64,6 +64,12 @@ def test_group_separators_splits_families():
     assert all("family" in t for t in table)
 
 
+def test_summarize_all_one_group_returns_empty_table():
+    # only wins (or only losses) -> group means would be NaN, so no separator table
+    rows, win, lose, table = summarize_regimes([_synth(k, True, -0.04, 0.5, 0.5) for k in (2700, 3300)])
+    assert len(win) == 2 and lose == [] and table == []
+
+
 def test_summarize_rejects_empty():
     with pytest.raises(ValueError):
         summarize_regimes([])
