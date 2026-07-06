@@ -120,3 +120,16 @@ def test_a0_smoke():
     # full model evolves storages -> mass audit residual must stay ~0 (code-leak gate)
     assert r["da"][1]["max_primary_residual"] < 1e-8
     assert r["bg"][1]["max_primary_residual"] < 1e-8
+
+
+@pytest.mark.jax
+def test_a0_storage_active_smoke():
+    # k0=3800 window covers active storage (Ice near step 4312): diagnostics fire but the
+    # mass-audit residual must stay within the P0 gate tolerance (code-leak detector).
+    from tools.report_forecast_da_fullmodel import build_a0
+    r = build_a0(k0=3800, window=120, lead=480)
+    assert r["valid_lead"] >= 3
+    assert math.isfinite(r["da"][0]["rmse"]) and isinstance(r["gate_da_vs_bg"][0], bool)
+    assert "diagnostic_steps_rate" in r["da"][1]
+    assert r["da"][1]["max_primary_residual"] < 1e-9     # within P0 gate tolerance
+    assert r["bg"][1]["max_primary_residual"] < 1e-9

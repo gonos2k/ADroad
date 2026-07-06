@@ -195,10 +195,13 @@ def main():
     ap.add_argument("--window", type=int, default=WINDOW)
     ap.add_argument("--lead", type=int, default=LEAD)
     ap.add_argument("--bg-w", type=float, default=BG_WEIGHT, dest="bg_w")
+    ap.add_argument("--tag", default="", help="artifact filename suffix + case_id (예: storage_active)")
     args = ap.parse_args()
     r = build_a0(args.k0, args.window, args.lead, args.bg_w)
     rows = _rows(r)
     outdir = REPO / "reports"; outdir.mkdir(exist_ok=True)
+    suffix = f"_{args.tag}" if args.tag else ""
+    case_id = args.tag or "default"
 
     import csv as _csv, io as _io
     buf = _io.StringIO(); w = _csv.writer(buf); w.writerow(_COLS)
@@ -234,11 +237,11 @@ def main():
               f"rate={dev_da_win['diagnostic_steps_rate']:.4f}",
               "", "해석: DA가 lead 예보 RMSE를 낮추면서(gate PASS) physics_worse=False면 열 보정이 full 예보에서 "
               "살아남고 물리 부담도 clean. physics_worse=True면 열을 맞추려다 융해/상전이를 왜곡한 것 → 설계 C 신호."]
-    (outdir / "forecast_da_fullmodel.md").write_text("\n".join(lines) + "\n", encoding="utf-8")
-    (outdir / "forecast_da_fullmodel.csv").write_text(buf.getvalue(), encoding="utf-8")
+    (outdir / f"forecast_da_fullmodel{suffix}.md").write_text("\n".join(lines) + "\n", encoding="utf-8")
+    (outdir / f"forecast_da_fullmodel{suffix}.csv").write_text(buf.getvalue(), encoding="utf-8")
 
     import json as _json
-    meta = {"k0": r["k0"], "window": r["window"], "lead": r["lead"], "bg_weight": r["bg_w"],
+    meta = {"case_id": case_id, "k0": r["k0"], "window": r["window"], "lead": r["lead"], "bg_weight": r["bg_w"],
             "valid_lead": r["valid_lead"],
             "bg_forecast_rmse": r["bg"][0]["rmse"], "da_forecast_rmse": r["da"][0]["rmse"],
             "const_forecast_rmse": r["const"]["rmse"], "rmse_delta_da_minus_bg": dbg,
@@ -262,9 +265,9 @@ def main():
             "bg_window_overflow_count": dev_bg_win["overflow_count"],
             "da_window_overflow_count": dev_da_win["overflow_count"],
             "state_correction_dx": r["dx"], "dx_l2": r["dx_l2"], "dx_max_abs": r["dx_max_abs"]}
-    (outdir / "forecast_da_fullmodel_meta.json").write_text(_json.dumps(meta, indent=2, allow_nan=False),
-                                                            encoding="utf-8")
-    print("wrote reports/forecast_da_fullmodel.{md,csv} + _meta.json")
+    (outdir / f"forecast_da_fullmodel{suffix}_meta.json").write_text(
+        _json.dumps(meta, indent=2, allow_nan=False), encoding="utf-8")
+    print(f"wrote reports/forecast_da_fullmodel{suffix}.{{md,csv}} + _meta.json")
     for row in rows:
         print(f"  {row['model']:20s} rmse={row['rmse']:.4f} gate_vs_bg={row['gate_vs_bg']}")
     print(f"  Δrmse(DA−bg)={dbg:+.4f}  physics_worse={r['physics_worse']}  "
