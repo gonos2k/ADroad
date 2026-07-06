@@ -36,14 +36,11 @@ from droad.skill_gate import forecast_metrics, skill_gate, diagnostics_delta  # 
 K0, WINDOW, LEAD, BG_WEIGHT = 2000, 120, 480, 0.05
 
 
-def _full_forecast(objs, k0, span, dx=None):
-    """full_rollout over [k0, k0+span) with obs insertion DISABLED (InitLenI=-1). When
-    dx is given, inject it into a COPIED thermal state and sync Surf.TsurfAve (state
-    isolation: BG/DA never share objects)."""
+def _inject_dx_state(objs, dx):
+    """Return (Tmp0, TmpNw0, surf0) for the forecast start. dx=None → background (no
+    correction). When dx is given it is added to a COPIED thermal state and Surf.TsurfAve
+    is synced to (Tmp0[1]+Tmp0[2])/2 — never mutates objs, so BG/DA stay isolated."""
     mi, mo, phy, g, s, a, coup, st, cpm, _ = objs
-    sl = slice(k0, k0 + span)
-    hours = np.array([t.hour for t in mi.time[sl]], float)
-    prec_in = np.array(mi.prec, float)[sl] / 3600.0 * st.DTSecs
     Tmp0 = np.array(g.Tmp, float).copy()
     TmpNw0 = np.array(g.TmpNw, float).copy()
     tsurf_ave = s.TsurfAve
@@ -55,19 +52,39 @@ def _full_forecast(objs, k0, span, dx=None):
                  SrfIce2=s.SrfIce2mms, SrfDep=s.SrfDepmms, TsurfAve=tsurf_ave,
                  Q2Melt=s.Q2Melt, T4Melt=s.T4Melt, WearSurf=s.WearSurf,
                  SnowType=a.SnowType, WetSnowFrozen=cpm.WetSnowFrozen, VeryCold=s.VeryCold)
-    sentinel = np.full(span, -9999.0)                         # no future-obs leakage
-    return full_rollout(
+    return Tmp0, TmpNw0, surf0
+
+
+def _forecast_kwargs(objs, k0, span, dx=None):
+    """Build the full_rollout kwargs for an A0 forecast over [k0, k0+span) with obs
+    insertion DISABLED (InitLenI=-1, TSurfObs=sentinel) and coupling off. Split out so a
+    unit test can lock the no-future-obs-leakage contract without running the model."""
+    mi, mo, phy, g, s, a, coup, st, cpm, _ = objs
+    avail = min(len(mi.TSurfObs), len(mi.Tair), len(mi.VZ), len(mi.Rhz), len(mi.SW),
+                len(mi.LW), len(mi.PrecPhase), len(mi.prec), len(mi.time))
+    if k0 + span > avail:
+        raise RuntimeError(f"k0+span={k0 + span} exceeds available data {avail}")
+    sl = slice(k0, k0 + span)
+    hours = np.array([t.hour for t in mi.time[sl]], float)
+    prec_in = np.array(mi.prec, float)[sl] / 3600.0 * st.DTSecs
+    Tmp0, TmpNw0, surf0 = _inject_dx_state(objs, dx)
+    return dict(
         Tair=np.array(mi.Tair, float)[sl], VZ=np.array(mi.VZ, float)[sl],
         Rhz=np.array(mi.Rhz, float)[sl], SW=np.array(mi.SW, float)[sl], LW=np.array(mi.LW, float)[sl],
-        TSurfObs=sentinel, hours=hours,
+        TSurfObs=np.full(span, -9999.0), hours=hours,               # sentinel → no obs insertion
         prec_phase=np.array(mi.PrecPhase, float)[sl], prec_in_tstep=prec_in,
         Tmp0=Tmp0, TmpNw0=TmpNw0, WCont=np.array(g.WCont, float),
         CC=np.array(g.CC, float), ZDpth=np.array(g.ZDpth, float),
         DyK=np.array(g.DyK, float), DyC=np.array(g.DyC, float),
         surf0=surf0, Albedo0=g.Albedo, BLCond0=a.BLCond,
         NLayers=st.NLayers, DTSecs=st.DTSecs, MaxPormms=phy.MaxPormms, Tph=st.Tph,
-        InitLenI=-1, phy=_phy(phy), day=_day(st), cp=_cp(cpm), n_steps=span,
+        InitLenI=-1, inCouplingPhase=False,                         # obs 삽입·coupling 명시적 off
+        phy=_phy(phy), day=_day(st), cp=_cp(cpm), n_steps=span,
         TsurfObsLast=coup.LastTsurfObs, return_ledger=True)
+
+
+def _full_forecast(objs, k0, span, dx=None):
+    return full_rollout(**_forecast_kwargs(objs, k0, span, dx))
 
 
 def build_a0(k0=K0, window=WINDOW, lead=LEAD, bg_w=BG_WEIGHT):
@@ -207,6 +224,13 @@ def main():
             "physics_worse": r["physics_worse"],
             "bg_lead_residual": r["bg"][1]["max_primary_residual"],
             "da_lead_residual": r["da"][1]["max_primary_residual"],
+            # analysis-window diagnostics (report-only)
+            "bg_window_diagnostic_steps_rate": dev_bg_win["diagnostic_steps_rate"],
+            "da_window_diagnostic_steps_rate": dev_da_win["diagnostic_steps_rate"],
+            "bg_window_over_melt_count": dev_bg_win["over_melt_count"],
+            "da_window_over_melt_count": dev_da_win["over_melt_count"],
+            "bg_window_overflow_count": dev_bg_win["overflow_count"],
+            "da_window_overflow_count": dev_da_win["overflow_count"],
             "state_correction_dx": r["dx"], "dx_l2": r["dx_l2"], "dx_max_abs": r["dx_max_abs"]}
     (outdir / "forecast_da_fullmodel_meta.json").write_text(_json.dumps(meta, indent=2, allow_nan=False),
                                                             encoding="utf-8")

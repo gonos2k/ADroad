@@ -1,13 +1,42 @@
 """Design A0 full-model forecast DA: pure row logic (fast) + jax-marked smoke."""
 import math
 import sys
+import types
 from pathlib import Path
 
+import numpy as np
 import pytest
 
 REPO = Path(__file__).resolve().parent.parent
 sys.path.insert(0, str(REPO))
-from tools.report_forecast_da_fullmodel import _rows, _COLS  # noqa: E402
+from tools.report_forecast_da_fullmodel import (  # noqa: E402
+    _rows, _COLS, _inject_dx_state, _forecast_kwargs,
+)
+
+
+def _fake_objs(n=50):
+    """Minimal objs tuple (mi, mo, phy, g, s, a, coup, st, cpm, _) for unit-testing the
+    forecast-kwargs / dx-injection contract without building the real model."""
+    ns = types.SimpleNamespace
+    arr = lambda v: np.full(n, v, float)
+    mi = ns(TSurfObs=arr(0.0), Tair=arr(-1.0), VZ=arr(2.0), Rhz=arr(80.0), SW=arr(0.0),
+            LW=arr(300.0), PrecPhase=arr(0.0), prec=arr(0.0),
+            time=[ns(hour=i % 24) for i in range(n)])
+    g = ns(Tmp=np.array([-1.0, -0.5, 0.0, 0.2, 0.4, 0.6, 0.8, 1.0]),
+           TmpNw=np.array([-1.0, -0.5, 0.0, 0.2, 0.4, 0.6, 0.8, 1.0]),
+           WCont=np.ones(8), CC=np.ones(8), ZDpth=np.ones(8), DyK=np.ones(8), DyC=np.ones(8),
+           Albedo=0.1)
+    s = ns(SrfWatmms=0.0, SrfSnowmms=0.0, SrfIcemms=0.0, SrfIce2mms=0.0, SrfDepmms=0.0,
+           TsurfAve=-0.25, Q2Melt=0.0, T4Melt=0.0, WearSurf=0.0, VeryCold=False)
+    a = ns(BLCond=1.0, SnowType=0)
+    st = ns(NLayers=6, DTSecs=30.0, MaxPormms=1.0, Tph=0.0, NightOn=20, NightOff=6,
+            CalmLimDay=0.5, CalmLimNgt=0.5, TrfFricDay=0.0, TrfFricNgt=0.0)
+    phy = ns(Poro1=0.3, Poro2=0.3, vsh1=1e6, vsh2=1e6, Emiss=0.95, SB_const=5.67e-8,
+             VK_Const=0.4, logUstar=1.0, logCond=1.0, logMom=1.0, logHeat=1.0, ZRefT=2.0,
+             Grav=9.81, LVap=2.5e6, LFus=3.34e5, MaxPormms=1.0)
+    cpm = ns(WetSnowFrozen=False)
+    coup = ns(LastTsurfObs=-9999.0)
+    return (mi, None, phy, g, s, a, coup, st, cpm, None)
 
 
 def _m(rmse, mae=0.1, ft=1.0):
@@ -32,6 +61,35 @@ def test_rows_fail_label_when_worse():
     r = {"const": _m(0.9), "bg": (_m(0.20), _dev()), "da": (_m(0.30), _dev()),
          "gate_da_vs_bg": (False, ["forecast RMSE 0.3000 worse than baseline 0.2000"])}
     assert _rows(r)[2]["gate_vs_bg"].startswith("FAIL")
+
+
+def test_forecast_kwargs_disables_obs_insertion():
+    # the no-future-obs-leakage contract: InitLenI=-1, sentinel TSurfObs, coupling off.
+    kw = _forecast_kwargs(_fake_objs(50), k0=10, span=20, dx=np.array([1.0, 1.0, 1.0, 1.0]))
+    assert kw["InitLenI"] == -1
+    assert bool(np.all(kw["TSurfObs"] == -9999.0))
+    assert kw["inCouplingPhase"] is False
+    assert kw["return_ledger"] is True
+    assert kw["n_steps"] == 20 and len(kw["Tair"]) == 20
+
+
+def test_forecast_kwargs_range_guard():
+    with pytest.raises(RuntimeError):
+        _forecast_kwargs(_fake_objs(30), k0=25, span=20)          # 45 > 30
+
+
+def test_inject_dx_syncs_tsurfave_and_isolates_state():
+    objs = _fake_objs(50)
+    g, s = objs[3], objs[4]
+    orig_tmp = g.Tmp.copy()
+    Tmp0, TmpNw0, surf0 = _inject_dx_state(objs, np.array([2.0, 2.0, 2.0, 2.0]))
+    assert surf0.TsurfAve == pytest.approx((Tmp0[1] + Tmp0[2]) / 2.0)   # synced
+    assert not np.shares_memory(Tmp0, g.Tmp)                            # isolated
+    assert np.allclose(g.Tmp, orig_tmp)                                # objs not mutated
+    assert Tmp0[1] == pytest.approx(orig_tmp[1] + 2.0)                 # dx applied to 1:5
+    # background (dx=None) keeps the physical Surf.TsurfAve
+    _, _, surf_bg = _inject_dx_state(objs, None)
+    assert surf_bg.TsurfAve == s.TsurfAve
 
 
 @pytest.mark.jax

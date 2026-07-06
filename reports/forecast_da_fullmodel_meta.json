@@ -12,6 +12,12 @@
   "physics_worse": false,
   "bg_lead_residual": 0.0,
   "da_lead_residual": 0.0,
+  "bg_window_diagnostic_steps_rate": 0.0,
+  "da_window_diagnostic_steps_rate": 0.0,
+  "bg_window_over_melt_count": 0,
+  "da_window_over_melt_count": 0,
+  "bg_window_overflow_count": 0,
+  "da_window_overflow_count": 0,
   "state_correction_dx": [
     -0.00845009115681211,
     -0.055208117263899355,
