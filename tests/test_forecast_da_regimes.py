@@ -52,11 +52,13 @@ def test_group_separators_splits_families():
     results = [_synth(2700, True, -0.04, 0.50, 0.5), _synth(1500, False, 0.12, 0.10, 0.5)]
     _rows, _w, _l, table = summarize_regimes(results)
     grouped = group_separators(table)
-    # ex-ante forcing must not contain endogenous DA-response features and vice versa
+    # families must stay disjoint: forcing != DA response != background fit
     ex_ante = {t["feature"] for t in grouped["ex_ante_forcing"]}
     da_resp = {t["feature"] for t in grouped["da_response"]}
+    bg_fit = {t["feature"] for t in grouped["background_fit"]}
     assert "tair_std" in ex_ante and "dx_l2" not in ex_ante
-    assert "bg_init_error" in da_resp and "dx_layer1" in da_resp
+    assert "dx_layer1" in da_resp and "bg_init_error" not in da_resp   # bg fit split out
+    assert "bg_init_error" in bg_fit and "train_bg" in bg_fit
     assert "obs_std" in {t["feature"] for t in grouped["post_hoc_obs"]}
     # every separator carries a family tag
     assert all("family" in t for t in table)

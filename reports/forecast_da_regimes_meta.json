@@ -82,7 +82,7 @@
     },
     {
       "feature": "degradation_bg",
-      "family": "da_response",
+      "family": "background_fit",
       "win_mean": 2.2964152275999714,
       "lose_mean": 0.6964169387571757,
       "diff": 1.5999982888427957,
@@ -275,6 +275,35 @@
         "separation": 0.3833333333333333
       }
     ],
+    "background_fit": [
+      {
+        "feature": "degradation_bg",
+        "family": "background_fit",
+        "win_mean": 2.2964152275999714,
+        "lose_mean": 0.6964169387571757,
+        "diff": 1.5999982888427957,
+        "direction": "higher in wins",
+        "separation": 0.6967373624825617
+      },
+      {
+        "feature": "train_bg",
+        "family": "background_fit",
+        "win_mean": 0.38141467397622497,
+        "lose_mean": 0.5177424692477836,
+        "diff": -0.13632779527155858,
+        "direction": "higher in losses",
+        "separation": 0.2633119810890271
+      },
+      {
+        "feature": "bg_init_error",
+        "family": "background_fit",
+        "win_mean": 0.38141467397622497,
+        "lose_mean": 0.5177424692477836,
+        "diff": -0.13632779527155858,
+        "direction": "higher in losses",
+        "separation": 0.2633119810890271
+      }
+    ],
     "da_response": [
       {
         "feature": "dx_layer1",
@@ -313,15 +342,6 @@
         "separation": 1.6777421018867567
       },
       {
-        "feature": "degradation_bg",
-        "family": "da_response",
-        "win_mean": 2.2964152275999714,
-        "lose_mean": 0.6964169387571757,
-        "diff": 1.5999982888427957,
-        "direction": "higher in wins",
-        "separation": 0.6967373624825617
-      },
-      {
         "feature": "degradation_da",
         "family": "da_response",
         "win_mean": 3.4089693457085493,
@@ -347,6 +367,15 @@
         "diff": -0.3166798798897452,
         "direction": "higher in losses",
         "separation": 0.28404549623821457
+      },
+      {
+        "feature": "dx_max_abs",
+        "family": "da_response",
+        "win_mean": 0.6805213088732832,
+        "lose_mean": 0.9396239456547397,
+        "diff": -0.2591026367814565,
+        "direction": "higher in losses",
+        "separation": 0.2757514194691059
       }
     ]
   },

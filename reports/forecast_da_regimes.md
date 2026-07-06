@@ -18,6 +18,7 @@ state-DA가 어떤 window에서 no-DA를 이기고 어떤 window에서 지는지
 
 ## Candidate regime signals (win vs lose group means)
 **n_win=2, n_lose=2 — 표본이 작아 separator ranking은 매우 불안정하다 (outlier 하나에 흔들림). 인과·일반규칙이 아니라 hypothesis generator로만 사용.**
+separation = |win_mean − lose_mean| / max(|win_mean|, |lose_mean|, eps); 그룹 평균의 **부호가 반대이면 1을 넘을 수 있으며, 통계적 유의성이 아니라 상대적 gap일 뿐이다.**
 
 ### A. Ex-ante forcing (예보시각에 알 수 있는 후보 regime 신호) — **1차 해석 기준**
 이 diagnostic은 forcing을 '예보로 주어진 forcing'으로 취급한다. 실측 forcing만 있으면 post-hoc 설명 feature로 해석할 것.
@@ -47,8 +48,17 @@ lead의 실측 관측에서 계산 — '왜 어려웠나'는 설명하나 ex-ant
 | obs_step_change_mean | 0.0069 | 0.0035 | higher in wins | 0.497 |
 | cold_fraction | 0.6167 | 1.0000 | higher in losses | 0.383 |
 
-### C. DA response / diagnostics (DA가 실제로 한 보정 — 원인 아닌 결과)
-dx_*·train·degradation은 DA의 반응이라 win/lose를 잘 나눠도 사전 원인으로 읽지 말 것.
+### C. Background-fit diagnostics (보정 안 한 background가 얼마나 틀렸나)
+bg_init_error·train_bg·degradation_bg는 background가 창에서 얼마나 어긋났는지 — DA 보정이 아니라 '동화 여지'의 크기.
+
+| feature | win_mean | lose_mean | direction | separation |
+| --- | ---: | ---: | --- | ---: |
+| degradation_bg | 2.2964 | 0.6964 | higher in wins | 0.697 |
+| train_bg | 0.3814 | 0.5177 | higher in losses | 0.263 |
+| bg_init_error | 0.3814 | 0.5177 | higher in losses | 0.263 |
+
+### D. DA response (DA가 실제로 한 보정 — 원인 아닌 결과)
+dx_*·train_da·degradation_da는 DA의 반응이라 win/lose를 잘 나눠도 사전 원인으로 읽지 말 것.
 
 | feature | win_mean | lose_mean | direction | separation |
 | --- | ---: | ---: | --- | ---: |
@@ -56,10 +66,10 @@ dx_*·train·degradation은 DA의 반응이라 win/lose를 잘 나눠도 사전 
 | dx_layer2 | 0.1714 | -0.2184 | higher in wins | 1.785 |
 | dx_layer3 | 0.6805 | -0.9396 | higher in wins | 1.724 |
 | dx_layer4 | 0.3757 | -0.5543 | higher in wins | 1.678 |
-| degradation_bg | 2.2964 | 0.6964 | higher in wins | 0.697 |
 | degradation_da | 3.4090 | 1.4929 | higher in wins | 0.562 |
 | train_delta | -0.1502 | -0.2359 | higher in wins | 0.364 |
 | dx_l2 | 0.7982 | 1.1149 | higher in losses | 0.284 |
+| dx_max_abs | 0.6805 | 0.9396 | higher in losses | 0.276 |
 
 ## 가설 점검(케이스 스터디)
 - **A (배경오차 큼 + model error 작음 → 이김)**: bg_init_error/train_delta가 win에서 유리?

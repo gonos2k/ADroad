@@ -64,9 +64,12 @@ for _f in ("const_rmse", "obs_std", "obs_range", "obs_trend_abs", "obs_step_chan
            "obs_step_change_max", "freeze_crossing_count", "cold_fraction"):
     _FAMILY[_f] = "post_hoc_obs"
 for _f in ("dx_l2", "dx_max_abs", "dx_layer1", "dx_layer2", "dx_layer3", "dx_layer4",
-           "train_da", "train_bg", "train_delta", "bg_init_error",
-           "degradation_da", "degradation_bg"):
+           "train_da", "train_delta", "degradation_da"):
     _FAMILY[_f] = "da_response"
+# background fit — how wrong the UNCORRECTED background was (not a DA action): its own
+# family so a "background was hard" signal isn't read as a DA-response signal.
+for _f in ("bg_init_error", "train_bg", "degradation_bg"):
+    _FAMILY[_f] = "background_fit"
 
 
 def _mean(xs):
@@ -100,7 +103,8 @@ def summarize_regimes(results):
 def group_separators(table):
     """Split the flat separator table into the three feature families (each still
     sorted by separation). Returns {family: [rows]}."""
-    grouped = {"ex_ante_forcing": [], "post_hoc_obs": [], "da_response": [], "other": []}
+    grouped = {"ex_ante_forcing": [], "post_hoc_obs": [], "background_fit": [],
+               "da_response": [], "other": []}
     for t in table:
         grouped[t["family"]].append(t)
     return grouped
@@ -158,7 +162,9 @@ def main():
     grouped = group_separators(table)
     lines += ["", "## Candidate regime signals (win vs lose group means)",
               f"**n_win={len(win)}, n_lose={len(lose)} — 표본이 작아 separator ranking은 매우 불안정하다 "
-              "(outlier 하나에 흔들림). 인과·일반규칙이 아니라 hypothesis generator로만 사용.**"]
+              "(outlier 하나에 흔들림). 인과·일반규칙이 아니라 hypothesis generator로만 사용.**",
+              "separation = |win_mean − lose_mean| / max(|win_mean|, |lose_mean|, eps); 그룹 평균의 "
+              "**부호가 반대이면 1을 넘을 수 있으며, 통계적 유의성이 아니라 상대적 gap일 뿐이다.**"]
     if win and lose:
         def fam(title, key, note):
             out = ["", f"### {title}", note, "",
@@ -174,8 +180,11 @@ def main():
                      "있으면 post-hoc 설명 feature로 해석할 것.")
         lines += fam("B. Post-hoc obs difficulty (사후 난이도 — 예보 전엔 모름)", "post_hoc_obs",
                      "lead의 실측 관측에서 계산 — '왜 어려웠나'는 설명하나 ex-ante 신호는 아님.")
-        lines += fam("C. DA response / diagnostics (DA가 실제로 한 보정 — 원인 아닌 결과)", "da_response",
-                     "dx_*·train·degradation은 DA의 반응이라 win/lose를 잘 나눠도 사전 원인으로 읽지 말 것.")
+        lines += fam("C. Background-fit diagnostics (보정 안 한 background가 얼마나 틀렸나)", "background_fit",
+                     "bg_init_error·train_bg·degradation_bg는 background가 창에서 얼마나 어긋났는지 — "
+                     "DA 보정이 아니라 '동화 여지'의 크기.")
+        lines += fam("D. DA response (DA가 실제로 한 보정 — 원인 아닌 결과)", "da_response",
+                     "dx_*·train_da·degradation_da는 DA의 반응이라 win/lose를 잘 나눠도 사전 원인으로 읽지 말 것.")
         lines += ["", "## 가설 점검(케이스 스터디)",
                   "- **A (배경오차 큼 + model error 작음 → 이김)**: bg_init_error/train_delta가 win에서 유리?",
                   "- **B (lead 난이도 상승 → 짐)**: degradation_da·obs_std·tair_trend_abs가 lose에서 큰가?",
@@ -190,16 +199,22 @@ def main():
     (outdir / "forecast_da_regimes.csv").write_text(buf.getvalue(), encoding="utf-8")
 
     import json as _json
+    # separators are only meaningful (and finite) with BOTH groups present; an all-win
+    # or all-lose run leaves NaN group means, so emit empty separators rather than NaN.
+    both = bool(win and lose)
+    top = table[:12] if both else []
+    grouped_top = {k: v[:8] for k, v in group_separators(table).items() if v} if both else {}
     meta = {"k0_first": args.k0, "windows": args.windows, "window": args.window,
             "lead": args.lead, "bg_weight": args.bg_w, "skipped_windows": skipped,
             "n_win": len(win), "n_lose": len(lose),
             "win_k0": [x["k0"] for x in win], "lose_k0": [x["k0"] for x in lose],
             "separator_stability_warning": f"n_win={len(win)}, n_lose={len(lose)} — unstable; "
             "hypothesis generator only",
-            "top_separators": table[:12],
-            "grouped_top_separators": {k: v[:8] for k, v in group_separators(table).items() if v},
-            "rows": rows}
-    (outdir / "forecast_da_regimes_meta.json").write_text(_json.dumps(meta, indent=2), encoding="utf-8")
+            "top_separators": top, "grouped_top_separators": grouped_top, "rows": rows}
+    # allow_nan=False -> fail loudly if any non-finite slipped in, rather than writing
+    # non-standard JSON that strict parsers reject.
+    (outdir / "forecast_da_regimes_meta.json").write_text(
+        _json.dumps(meta, indent=2, allow_nan=False), encoding="utf-8")
     print("wrote reports/forecast_da_regimes.{md,csv} + forecast_da_regimes_meta.json")
     print(f"  wins {len(win)}/{len(rows)}  win_k0={[x['k0'] for x in win]}  lose_k0={[x['k0'] for x in lose]}")
     if win and lose:
