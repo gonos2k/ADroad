@@ -1,7 +1,7 @@
 # Full-model forecast DA — 확장 설계 (Step 3)
 
 > **Status**: design (구현 전) · **Date**: 2026-07-06
-> **Basis code/report commit**: `fddee2b` · **Design doc**: `2bfd2fb` → revision `c6fe484`
+> **Basis code/report commit**: `fddee2b` · **Design doc**: `2bfd2fb` → revisions `c6fe484`, `64a2473`
 > **참조 리포트 (existing)**: `reports/forecast_da.md`, `reports/forecast_da_multi.md`, `reports/forecast_da_regimes.md`, `reports/forecast_da_grid.md`, `docs/report/dROAD_report.md` §5.4–5.6
 > **참조 리포트 (planned)**: `reports/forecast_da_fullmodel*.md` (설계 A 구현 시 산출)
 
@@ -174,12 +174,14 @@ build_A0(k0, window, lead, bg_w):
     budget_steps = range(int(lead_idx[0]), int(lead_idx[-1]) + 1)
     dev_bg = deviation_budget(out_bg, steps=budget_steps)
     dev_da = deviation_budget(out_da, steps=budget_steps)
-    # (report-only) analysis-window diagnostics — lead 진입 전 보정이 storage 부담을 키웠는지 확인용
+    # (report-only) analysis-window diagnostics — lead 진입 전 보정이 storage 부담을 키웠는지 확인용.
+    # BG/DA 둘 다 집계해 비교 가능하게 한다(gate 아님, 기록만).
     win_steps = range(0, window)
-    dev_da_win = deviation_budget(out_da, steps=win_steps)            # gate 아님, 기록만
+    dev_bg_win = deviation_budget(out_bg, steps=win_steps)
+    dev_da_win = deviation_budget(out_da, steps=win_steps)
 
     gate = skill_gate(m_da, m_bg, deviation=dev_da, baseline_deviation=dev_bg)  # skill + 물리부담(lead)
-    return {m_bg, m_da, dev_bg, dev_da, dev_da_win, gate, dx_l2,
+    return {m_bg, m_da, dev_bg, dev_da, dev_bg_win, dev_da_win, gate, dx_l2,
             physics_worse=diagnostics_delta(dev_da, dev_bg).physics_worse}
 ```
 
