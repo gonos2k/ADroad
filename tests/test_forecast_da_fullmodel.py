@@ -123,13 +123,20 @@ def test_a0_smoke():
 
 
 @pytest.mark.jax
-def test_a0_storage_active_smoke():
-    # k0=3800 window covers active storage (Ice near step 4312): diagnostics fire but the
-    # mass-audit residual must stay within the P0 gate tolerance (code-leak detector).
+def test_a0_storage_active_window_diagnostics_report_only():
+    # k0=3800 window covers active storage (Ice near step 4312). Lock WHERE the storage
+    # signal lives: analysis-window (report-only) has diagnostics, the lead PRIMARY gate
+    # stays clean (rate 0, residual within P0 tolerance). This does NOT yet show the lead
+    # gate handling an increased burden.
     from tools.report_forecast_da_fullmodel import build_a0
     r = build_a0(k0=3800, window=120, lead=480)
-    assert r["valid_lead"] >= 3
-    assert math.isfinite(r["da"][0]["rmse"]) and isinstance(r["gate_da_vs_bg"][0], bool)
-    assert "diagnostic_steps_rate" in r["da"][1]
-    assert r["da"][1]["max_primary_residual"] < 1e-9     # within P0 gate tolerance
-    assert r["bg"][1]["max_primary_residual"] < 1e-9
+    dev_bg, dev_da = r["bg"][1], r["da"][1]
+    dev_bg_win, dev_da_win = r["win"]
+    # primary lead gate is clean
+    assert dev_bg["diagnostic_steps_rate"] == pytest.approx(0.0)
+    assert dev_da["diagnostic_steps_rate"] == pytest.approx(0.0)
+    # storage activity shows up in the analysis-window report-only budget
+    assert dev_bg_win["diagnostic_steps_rate"] > 0.0
+    assert dev_da_win["diagnostic_steps_rate"] > 0.0
+    # residual stays code-clean (within P0 gate tolerance) in both windows
+    assert dev_da["max_primary_residual"] < 1e-9 and dev_bg["max_primary_residual"] < 1e-9

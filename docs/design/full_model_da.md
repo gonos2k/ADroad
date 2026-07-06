@@ -222,7 +222,8 @@ build_A0(k0, window, lead, bg_w):
 **구현 전 필수 체크(설계 A0에 반영 완료)**: ①주입 방식 A0(raw-start) 확정 ②lead obs 삽입 차단 ③`apply_dx` TsurfAve 동기화+격리 ④deviation local index.
 
 - [x] 설계 A0 프로토타입 `tools/report_forecast_da_fullmodel.py` 구현(단일 window) → skill + deviation 동시 게이트. leakage 차단·TsurfAve 동기화·dx 검증 회귀테스트 포함.
-- [x] **storage-active 검증**(`--k0 3800 --tag storage_active`, lead가 Ice@4312 포함): storage 활성 신호는 **window diag_rate 4.17%**(residual은 2.2e-16으로 **P0 tolerance(1e-9) 이내 = clean**; residual은 code-leak detector라 "≠0"으로 표현하지 않음). DA가 RMSE 1.3441→1.1866(Δ−0.1575, PASS) 개선하면서 DA/no-DA 물리 부담 동일(physics_worse=False). k0=2000(완전 비활성, diag_rate 0)과 대조 → deviation 감사가 실제로 exercised됨을 확인. artifact: `reports/forecast_da_fullmodel_storage_active.*`. (gate가 위반을 FAIL로 잡는 경로는 test_skill_gate에서 unit 검증.)
+- [x] **storage-active 검증**(`--k0 3800 --tag storage_active`, lead가 Ice@4312 포함): storage 활성 신호(diag_rate 4.17%)는 **analysis-window(report-only)**에서 발생, **lead primary gate diag_rate는 0**(residual 2.2e-16도 P0 tolerance 이내 = clean; residual은 code-leak detector라 "≠0" 표현 금지). DA가 RMSE 1.3441→1.1866(Δ−0.1575, PASS) 개선, DA/no-DA 물리 부담 동일(physics_worse=False). **정확한 결론**: "storage-active signal 있는 window에서 A0 wiring clean + DA skill 개선"까지이며, **"lead deviation gate가 active burden 증가를 처리"는 아직 아님**(lead burden 0). artifact: `reports/forecast_da_fullmodel_storage_active.*`.
+- [ ] **lead 구간에서 diagnostics가 실제 발생하는 window** 또는 synthetic stress로, lead primary gate가 burden을 처리(또는 physics_worse=True로 FAIL)하는지 확인 — 이게 lead-gate의 진짜 stress-test.
 - [ ] 다중 window 재현 + grid(짧은 동화창·긴 lead prior 재사용) → promotion REPORT_ONLY 확인.
 - [ ] DA가 물리 부담을 실제로 악화시키는 stress case(대형 dx 또는 melt-임박 window)에서 physics_worse=True로 gate FAIL 재현.
 - [ ] 결과를 `docs/report/dROAD_report.md` §5에 편입, 정직성 톤 유지(단일 fixture, physics_worse 여부 명시).

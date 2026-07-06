@@ -223,9 +223,16 @@ def main():
     for row in rows:
         lines.append("| " + " | ".join(
             (f"{row[c]:.4f}" if isinstance(row[c], float) else str(row[c])) for c in _COLS) + " |")
+    dev_bg_lead, dev_da_lead = r["bg"][1], r["da"][1]
+    dx_large = r["dx_max_abs"] > 2.0 or r["dx_l2"] > 3.0
     lines += ["", "## DA vs no-DA (핵심)",
               f"- Δrmse (DA − background): {dbg:+.4f}  ({'개선' if dbg < 0 else '미개선'})",
               f"- physics_worse (over_melt/overflow/rate 악화 여부): **{r['physics_worse']}**",
+              f"- diag_steps_rate — **lead(primary gate)**: bg {dev_bg_lead['diagnostic_steps_rate']:.4f} / "
+              f"da {dev_da_lead['diagnostic_steps_rate']:.4f}  ·  **window(report-only)**: "
+              f"bg {dev_bg_win['diagnostic_steps_rate']:.4f} / da {dev_da_win['diagnostic_steps_rate']:.4f}",
+              f"- state_correction_large (dx_l2>3 또는 max|dx|>2): {dx_large} "
+              f"(dx_l2={r['dx_l2']:.3f}, max|dx|={r['dx_max_abs']:.3f})",
               f"- Δover_melt: {r['delta']['delta_over_melt_count']} · Δoverflow: {r['delta']['delta_overflow_count']} · "
               f"Δdiag_rate: {r['delta']['delta_diagnostic_steps_rate']:+.4f}",
               f"- state correction dx (layers 1:5): [{', '.join(f'{v:+.3f}' for v in r['dx'])}] "
@@ -235,6 +242,9 @@ def main():
               f"rate={dev_bg_win['diagnostic_steps_rate']:.4f}",
               f"- DA:         over_melt={dev_da_win['over_melt_count']} overflow={dev_da_win['overflow_count']} "
               f"rate={dev_da_win['diagnostic_steps_rate']:.4f}",
+              "", "**주의**: diagnostic 활동이 window(report-only)에서만 발생하고 lead(primary gate)에서 0이면, "
+              "이 case는 'storage-active signal은 있으나 lead deviation gate는 clean'이다 — lead gate가 실제 "
+              "burden 증가를 처리했다는 증거는 아니다(그건 lead 구간에 diagnostics가 발생하는 window/stress 필요).",
               "", "해석: DA가 lead 예보 RMSE를 낮추면서(gate PASS) physics_worse=False면 열 보정이 full 예보에서 "
               "살아남고 물리 부담도 clean. physics_worse=True면 열을 맞추려다 융해/상전이를 왜곡한 것 → 설계 C 신호."]
     (outdir / f"forecast_da_fullmodel{suffix}.md").write_text("\n".join(lines) + "\n", encoding="utf-8")
@@ -264,7 +274,8 @@ def main():
             "da_window_over_melt_count": dev_da_win["over_melt_count"],
             "bg_window_overflow_count": dev_bg_win["overflow_count"],
             "da_window_overflow_count": dev_da_win["overflow_count"],
-            "state_correction_dx": r["dx"], "dx_l2": r["dx_l2"], "dx_max_abs": r["dx_max_abs"]}
+            "state_correction_dx": r["dx"], "dx_l2": r["dx_l2"], "dx_max_abs": r["dx_max_abs"],
+            "state_correction_large": bool(r["dx_max_abs"] > 2.0 or r["dx_l2"] > 3.0)}
     (outdir / f"forecast_da_fullmodel{suffix}_meta.json").write_text(
         _json.dumps(meta, indent=2, allow_nan=False), encoding="utf-8")
     print(f"wrote reports/forecast_da_fullmodel{suffix}.{{md,csv}} + _meta.json")
