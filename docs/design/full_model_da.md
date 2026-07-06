@@ -1,7 +1,9 @@
 # Full-model forecast DA — 확장 설계 (Step 3)
 
-> **Status**: design (구현 전) · **Date**: 2026-07-06 · **Basis**: commit `fddee2b`
-> **선행 결과**: `docs/report/dROAD_report.md` §5.4–5.6, `reports/forecast_da*.md`, `reports/forecast_da_grid.md`
+> **Status**: design (구현 전) · **Date**: 2026-07-06
+> **Basis code commit**: `fddee2b` · **Design doc commit**: `2bfd2fb`
+> **참조 리포트 (existing)**: `reports/forecast_da.md`, `reports/forecast_da_multi.md`, `reports/forecast_da_regimes.md`, `reports/forecast_da_grid.md`, `docs/report/dROAD_report.md` §5.4–5.6
+> **참조 리포트 (planned)**: `reports/forecast_da_fullmodel*.md` (설계 A 구현 시 산출)
 
 이 문서는 현재 **dry-only** 상태추정 forecast DA를 **full model(storage/phase-change 포함)**로 확장하는 설계다. 구현 전 리뷰용이며, 확정 시 `tools/`에 프로토타입을 추가한다.
 
@@ -62,6 +64,12 @@ full model 확장의 본질은 **"$dx$(또는 storage 보정)를 full 모델의 
 - **장점**: full physics에 가장 근접, storage/phase 오차까지 교정.
 - **단점**: smooth surrogate와 exact 모델의 parity를 항상 감사해야 함(대체모델 오차가 DA 이득을 오염시킬 위험). 구현·검증 비용 큼.
 - **제어변수**: thermal offset + storage 보정(비음수 제약, soft_clip 필요).
+- **parity gate(필수)**: `deviation_budget`(exact rollout의 mass/diagnostics)만으로는 부족하다. surrogate가 예측한 것과 exact 재실행의 **divergence**를 별도 metric으로 게이트한다:
+  - `surrogate_exact_tsurf_rmse` (표면온도 궤적 차)
+  - `surrogate_exact_storage_max_abs_delta` (저장소 궤적 최대 차)
+  - `surrogate_exact_diagnostic_delta` (진단 부담 차)
+
+  임계 초과 시 **"smooth DA result not trusted"**로 처리해 promotion 후보에서 제외한다.
 
 ### 설계 C — two-stage DA (현실적 중간안)
 
@@ -91,36 +99,79 @@ full model로 가면 dry에서 미적용이던 감사가 **필수**로 복귀한
 
 즉 full-model DA는 **"skill 개선 + 물리 부담 비악화 + 질량 잔차 clean"** 세 조건을 동시에 만족할 때만 의미가 있다. dry DA가 skill-only였던 것과 달리, 여기서는 `physics_worse=True`면 skill이 좋아도 flag된다.
 
+**진단 gate 지위(명시)**: `skill_gate`/`diagnostics_delta().physics_worse`가 명시적으로 count-gate하는 부담은 `diagnostic_steps_rate`, `over_melt_count`, `overflow_count`다. **`negative_pre_clamp_count`는 설계 A에서 report-only**(전체 진단은 `diagnostic_steps_rate`에 반영되나 개별 count-gate는 아님) — 필요 시 후속 단계에서 `physics_worse` 항목으로 승격한다. (Option 1: rate가 일반 부담을 포착, count는 report-only.)
+
 ---
 
 ## 5. 설계 A 상세 스펙 (첫 프로토타입)
 
 **도구(예정)**: `tools/report_forecast_da_fullmodel.py` — 기존 `report_forecast_da`(dx 추정)와 `report_da_evaluation`(full spin + full_rollout)의 재사용.
 
-**의사코드**
+#### 5.1 보정 주입 방식 — A0 vs A1 (반드시 택일·명시)
+
+현재 dry DA는 raw `dx`를 **window 시작(k0)** 상태에 더한 뒤 동화창을 전파해 `k0+window`의 analysis end-state(`carry_a`)를 만든다(background는 `carry_b`). 따라서 raw `dx`를 `k0+window` full state에 **직접** 더하면 "window 시작 보정"을 "window 끝 보정"처럼 오적용하게 된다. 두 방식 중 하나로 명확히 정의한다:
+
+- **A0 (raw-start injection, 권장 1차)**: full 모델 `k0` state에 raw `dx`를 넣고, full 모델을 analysis window 동안 **자유전파**한 end-state에서 lead를 예보. dry DA와 시간 의미가 가장 일치.
+- **A1 (evolved-end correction)**: dry 모델에서 `dTmp_end = carry_a − carry_b`(k0+window의 evolved 열상태 차)를 계산해 full `k0+window` state에 주입.
+
+**raw `dx`를 `k0+window`에 직접 더하는 것은 명시적 근사로 취급할 때만 허용한다.** 1차 프로토타입은 A0로 구현하고, A1을 비교군으로 둔다.
+
+#### 5.2 forecast lead의 관측 삽입 차단 (no future-obs leakage)
+
+`full_rollout()`은 매 step에서 `i <= InitLenI` 이고 `TSurfObs[i] > -100`이면 `Tmp[1], Tmp[2]`에 관측 표면온도를 삽입한다. **lead 예보에 실제 `TSurfObs`와 양수 `InitLenI`를 그대로 넘기면 미래 관측이 삽입되어 skill leakage가 발생한다.** lead full_rollout은 반드시:
+
 ```
-build_A(k0, window, lead, bg_w):
-    # dx 추정 (dry, 현재 방식)
-    dx = estimate_dry_dx(k0, window, bg_w)          # report_forecast_da 재사용
+- lead 구간 forcing만 슬라이스해 전달
+- InitLenI = -1 (또는 obs 삽입 완전 비활성화)
+- TSurfObs를 sentinel(-9999)로 넘겨 Tmp[1:2] 덮어쓰기 원천 차단
+```
 
-    # full 모델 분석상태 (k0+window 까지 spin)
-    objs = build_model(); advance_full(objs, 0, k0+window)
-    state_bg = capture_full_state(objs)             # Surf, Tmp, TmpNw, Albedo, BLCond
+(A0의 analysis-window 전파 구간에서는 dry DA와 동일하게 obs를 삽입하지 않는다 — dry는 `mask=zeros`로 free-run 전파했음.)
 
-    # 두 예보 (lead)
-    out_bg = full_rollout(state_bg,               ..., n_steps=lead, return_ledger=True)
-    state_da = apply_dx(state_bg, dx)               # Tmp/TmpNw layers 1:5 += dx
-    out_da = full_rollout(state_da,               ..., n_steps=lead, return_ledger=True)
+#### 5.3 `apply_dx()` — TsurfAve 동기화 + 상태 격리
 
-    # 평가
-    obs_lead = TSurfObs[k0+window : k0+window+lead];  valid = obs>-100
-    m_bg = forecast_metrics(out_bg.Tsurf[valid], obs[valid])
-    m_da = forecast_metrics(out_da.Tsurf[valid], obs[valid])
-    dev_bg = deviation_budget(out_bg, steps=lead_valid_interval)
-    dev_da = deviation_budget(out_da, steps=lead_valid_interval)
+`full_rollout`은 관측 삽입이 없으면 `tsa = surf.TsurfAve`를 써서 표면상태를 구성한다. 따라서 `Tmp/TmpNw`만 바꾸고 `Surf.TsurfAve`를 두면 첫 step에서 표면-평균 상태가 열층과 불일치한다. 또한 DA/BG run이 같은 객체를 공유하면 안 된다:
+
+```python
+def apply_dx(state, dx):          # state = (surf, Tmp, TmpNw, Albedo, BLCond)
+    Tmp   = state.Tmp.copy();   Tmp[1:5]   += dx
+    TmpNw = state.TmpNw.copy(); TmpNw[1:5] += dx
+    surf  = replace(state.surf, TsurfAve=(Tmp[1] + Tmp[2]) / 2.0)   # 동기화
+    return State(surf, Tmp, TmpNw, state.Albedo, state.BLCond)      # 새 객체(격리)
+```
+
+BG run도 동일하게 deep-copy된 상태에서 시작해 DA run과 부작용을 공유하지 않는다.
+
+#### 5.4 의사코드 (A0)
+
+```
+build_A0(k0, window, lead, bg_w):
+    dx = estimate_dry_dx(k0, window, bg_w)              # report_forecast_da 재사용
+
+    objs = build_model(); advance_full(objs, 0, k0)     # k0 까지만 spin
+    state_k0 = capture_full_state(objs)                 # 배경 k0 상태
+
+    # A0: k0에서 raw dx 주입 후 (window+lead) 전체를 obs 미삽입 free-run
+    forc = slice_forcings(k0, k0+window+lead)            # InitLenI=-1, TSurfObs=sentinel
+    out_bg = full_rollout(state_k0,          forc, n_steps=window+lead, return_ledger=True)
+    out_da = full_rollout(apply_dx(state_k0, dx), forc, n_steps=window+lead, return_ledger=True)
+
+    # 평가는 lead 구간(window: 이후)만
+    obs = TSurfObs[k0 : k0+window+lead]
+    lead_idx = flatnonzero(obs > -100); lead_idx = lead_idx[lead_idx >= window]
+    m_bg = forecast_metrics(out_bg.Tsurf[lead_idx], obs[lead_idx])
+    m_da = forecast_metrics(out_da.Tsurf[lead_idx], obs[lead_idx])
+
+    # deviation budget: LOCAL index (out_*는 [0, window+lead) 시계열)
+    budget_steps = range(int(lead_idx[0]), int(lead_idx[-1]) + 1)
+    dev_bg = deviation_budget(out_bg, steps=budget_steps)
+    dev_da = deviation_budget(out_da, steps=budget_steps)
+
     gate = skill_gate(m_da, m_bg, deviation=dev_da, baseline_deviation=dev_bg)  # skill + 물리부담
-    return {m_bg, m_da, dev_bg, dev_da, gate, dx_l2, ...}
+    return {m_bg, m_da, dev_bg, dev_da, gate, dx_l2, physics_worse=diagnostics_delta(dev_da,dev_bg).physics_worse}
 ```
+
+> **P1 주의(요약)**: (1) A0/A1 주입 방식을 명시 — raw dx를 k0+window에 직접 더하지 말 것. (2) lead에서 `InitLenI=-1`·sentinel obs로 미래 관측 삽입 차단. (3) `apply_dx`가 `TsurfAve` 동기화 + 상태 격리. (4) lead-only 시계열이므로 `deviation_budget(steps=)`는 **local index**.
 
 **평가 축**
 - `gate_vs_bg`: DA 예보가 no-DA를 이기는가 (RMSE hard) **AND** 물리 부담 비악화.
@@ -152,7 +203,9 @@ build_A(k0, window, lead, bg_w):
 
 ## 7. 다음 액션
 
-- [ ] 설계 A 프로토타입 `tools/report_forecast_da_fullmodel.py` 구현(단일 window) → skill + deviation 동시 게이트.
+**구현 전 필수 체크(설계 A0에 반영 완료)**: ①주입 방식 A0(raw-start) 확정 ②lead obs 삽입 차단 ③`apply_dx` TsurfAve 동기화+격리 ④deviation local index.
+
+- [ ] 설계 A0 프로토타입 `tools/report_forecast_da_fullmodel.py` 구현(단일 window) → skill + deviation 동시 게이트. A1(evolved-end)은 비교군.
 - [ ] 다중 window 재현 + grid(짧은 동화창·긴 lead prior 재사용) → promotion REPORT_ONLY 확인.
 - [ ] 결과를 `docs/report/dROAD_report.md` §5에 편입, 정직성 톤 유지(단일 fixture, physics_worse 여부 명시).
 - [ ] 설계 C는 A 결과에서 physics_worse가 관측될 때 착수.
