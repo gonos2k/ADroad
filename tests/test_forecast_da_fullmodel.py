@@ -80,6 +80,8 @@ def test_forecast_kwargs_range_and_arg_guards():
         _forecast_kwargs(_fake_objs(30), k0=-1, span=10)          # k0 < 0
     with pytest.raises(RuntimeError):
         _forecast_kwargs(_fake_objs(30), k0=0, span=0)            # span <= 0
+    with pytest.raises(RuntimeError):
+        _forecast_kwargs(_fake_objs(30), k0=1.5, span=10)         # non-integer k0
 
 
 def test_inject_dx_rejects_bad_shape_or_nonfinite():
@@ -88,6 +90,10 @@ def test_inject_dx_rejects_bad_shape_or_nonfinite():
         _inject_dx_state(objs, np.array([1.0, 1.0, 1.0]))         # shape (3,)
     with pytest.raises(ValueError):
         _inject_dx_state(objs, np.array([1.0, float("nan"), 1.0, 1.0]))   # non-finite
+    with pytest.raises(ValueError):
+        _inject_dx_state(objs, np.array([True, True, True, True]))         # bool dtype
+    with pytest.raises(ValueError):
+        _inject_dx_state(objs, np.array(["1", "1", "1", "1"]))            # string dtype
 
 
 def test_inject_dx_syncs_tsurfave_and_isolates_state():

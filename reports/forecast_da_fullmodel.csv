@@ -1,4 +1,4 @@
 model,rmse,mae,freeze_thaw_accuracy,max_primary_residual,over_melt_count,overflow_count,gate_vs_bg
 constant_initial,0.9179765577879144,0.804375,1.0,,,,baseline
-no_DA(background),0.22101680101688823,0.1795654154048666,1.0,0.0,0,0,baseline
-"DA(state, full)",0.20823168884659027,0.1870616034955922,1.0,0.0,0,0,PASS
+no_DA(background),0.221016992824681,0.17955517043585026,1.0,0.0,0,0,baseline
+"DA(state, full)",0.20822192631994668,0.1870490664742934,1.0,0.0,0,0,PASS

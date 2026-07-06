@@ -38,8 +38,12 @@ K0, WINDOW, LEAD, BG_WEIGHT = 2000, 120, 480, 0.05
 
 def _validate_dx(dx):
     """A state correction is a finite offset for near-surface layers 1:5 (shape (4,)).
-    Reject anything else so a wrong-shape dx can't broadcast silently."""
-    d = np.asarray(dx, float)
+    Reject wrong shape, non-finite, and bool/string/object (matching the project-wide
+    numeric policy) so a bad dx can't broadcast or coerce silently."""
+    arr = np.asarray(dx)
+    if arr.dtype.kind not in ("i", "u", "f"):          # no bool/str/object coercion
+        raise ValueError("dx must be a numeric array, not bool/string/object")
+    d = arr.astype(float)
     if d.shape != (4,):
         raise ValueError(f"dx must have shape (4,), got {d.shape}")
     if not np.all(np.isfinite(d)):
@@ -72,6 +76,8 @@ def _forecast_kwargs(objs, k0, span, dx=None):
     insertion DISABLED (InitLenI=-1, TSurfObs=sentinel) and coupling off. Split out so a
     unit test can lock the no-future-obs-leakage contract without running the model."""
     mi, mo, phy, g, s, a, coup, st, cpm, _ = objs
+    if int(k0) != k0 or int(span) != span:
+        raise RuntimeError("k0/span must be integer steps")
     if k0 < 0:
         raise RuntimeError("k0 must be non-negative")
     if span <= 0:
@@ -237,6 +243,7 @@ def main():
             "bg_forecast_rmse": r["bg"][0]["rmse"], "da_forecast_rmse": r["da"][0]["rmse"],
             "const_forecast_rmse": r["const"]["rmse"], "rmse_delta_da_minus_bg": dbg,
             "da_gate_vs_bg": "PASS" if r["gate_da_vs_bg"][0] else "FAIL",
+            "da_gate_vs_bg_reasons": list(r["gate_da_vs_bg"][1]),   # FAIL 시 RMSE/residual/burden 사유
             "physics_worse": r["physics_worse"],
             "bg_lead_residual": r["bg"][1]["max_primary_residual"],
             "da_lead_residual": r["da"][1]["max_primary_residual"],

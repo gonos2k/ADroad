@@ -8,7 +8,7 @@ k0=2000 · 동화창 120 · 예보 lead 480 valid obs 480개. raw dx at k0 (A0).
 | --- | --- | --- | --- | --- | --- | --- | --- |
 | constant_initial | 0.9180 | 0.8044 | 1.0000 |  |  |  | baseline |
 | no_DA(background) | 0.2210 | 0.1796 | 1.0000 | 0.0000 | 0 | 0 | baseline |
-| DA(state, full) | 0.2082 | 0.1871 | 1.0000 | 0.0000 | 0 | 0 | PASS |
+| DA(state, full) | 0.2082 | 0.1870 | 1.0000 | 0.0000 | 0 | 0 | PASS |
 
 ## DA vs no-DA (핵심)
 - Δrmse (DA − background): -0.0128  (개선)

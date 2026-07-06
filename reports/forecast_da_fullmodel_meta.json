@@ -9,6 +9,7 @@
   "const_forecast_rmse": 0.9179765577879144,
   "rmse_delta_da_minus_bg": -0.012795066504734331,
   "da_gate_vs_bg": "PASS",
+  "da_gate_vs_bg_reasons": [],
   "physics_worse": false,
   "bg_lead_residual": 0.0,
   "da_lead_residual": 0.0,
