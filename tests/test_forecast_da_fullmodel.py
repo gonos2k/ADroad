@@ -73,9 +73,21 @@ def test_forecast_kwargs_disables_obs_insertion():
     assert kw["n_steps"] == 20 and len(kw["Tair"]) == 20
 
 
-def test_forecast_kwargs_range_guard():
+def test_forecast_kwargs_range_and_arg_guards():
     with pytest.raises(RuntimeError):
-        _forecast_kwargs(_fake_objs(30), k0=25, span=20)          # 45 > 30
+        _forecast_kwargs(_fake_objs(30), k0=25, span=20)          # 45 > 30 (out of data)
+    with pytest.raises(RuntimeError):
+        _forecast_kwargs(_fake_objs(30), k0=-1, span=10)          # k0 < 0
+    with pytest.raises(RuntimeError):
+        _forecast_kwargs(_fake_objs(30), k0=0, span=0)            # span <= 0
+
+
+def test_inject_dx_rejects_bad_shape_or_nonfinite():
+    objs = _fake_objs(30)
+    with pytest.raises(ValueError):
+        _inject_dx_state(objs, np.array([1.0, 1.0, 1.0]))         # shape (3,)
+    with pytest.raises(ValueError):
+        _inject_dx_state(objs, np.array([1.0, float("nan"), 1.0, 1.0]))   # non-finite
 
 
 def test_inject_dx_syncs_tsurfave_and_isolates_state():

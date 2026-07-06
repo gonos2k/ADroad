@@ -36,6 +36,17 @@ from droad.skill_gate import forecast_metrics, skill_gate, diagnostics_delta  # 
 K0, WINDOW, LEAD, BG_WEIGHT = 2000, 120, 480, 0.05
 
 
+def _validate_dx(dx):
+    """A state correction is a finite offset for near-surface layers 1:5 (shape (4,)).
+    Reject anything else so a wrong-shape dx can't broadcast silently."""
+    d = np.asarray(dx, float)
+    if d.shape != (4,):
+        raise ValueError(f"dx must have shape (4,), got {d.shape}")
+    if not np.all(np.isfinite(d)):
+        raise ValueError("dx must be finite")
+    return d
+
+
 def _inject_dx_state(objs, dx):
     """Return (Tmp0, TmpNw0, surf0) for the forecast start. dx=None → background (no
     correction). When dx is given it is added to a COPIED thermal state and Surf.TsurfAve
@@ -45,6 +56,7 @@ def _inject_dx_state(objs, dx):
     TmpNw0 = np.array(g.TmpNw, float).copy()
     tsurf_ave = s.TsurfAve
     if dx is not None:
+        dx = _validate_dx(dx)                                 # shape (4,) + finite
         Tmp0[1:5] += dx
         TmpNw0[1:5] += dx
         tsurf_ave = (Tmp0[1] + Tmp0[2]) / 2.0                 # TsurfAve 동기화
@@ -60,6 +72,10 @@ def _forecast_kwargs(objs, k0, span, dx=None):
     insertion DISABLED (InitLenI=-1, TSurfObs=sentinel) and coupling off. Split out so a
     unit test can lock the no-future-obs-leakage contract without running the model."""
     mi, mo, phy, g, s, a, coup, st, cpm, _ = objs
+    if k0 < 0:
+        raise RuntimeError("k0 must be non-negative")
+    if span <= 0:
+        raise RuntimeError("span must be positive")
     avail = min(len(mi.TSurfObs), len(mi.Tair), len(mi.VZ), len(mi.Rhz), len(mi.SW),
                 len(mi.LW), len(mi.PrecPhase), len(mi.prec), len(mi.time))
     if k0 + span > avail:
@@ -224,6 +240,13 @@ def main():
             "physics_worse": r["physics_worse"],
             "bg_lead_residual": r["bg"][1]["max_primary_residual"],
             "da_lead_residual": r["da"][1]["max_primary_residual"],
+            # lead diagnostic burden (the primary physics gate inputs)
+            "bg_lead_diagnostic_steps_rate": r["bg"][1]["diagnostic_steps_rate"],
+            "da_lead_diagnostic_steps_rate": r["da"][1]["diagnostic_steps_rate"],
+            "bg_lead_over_melt_count": r["bg"][1]["over_melt_count"],
+            "da_lead_over_melt_count": r["da"][1]["over_melt_count"],
+            "bg_lead_overflow_count": r["bg"][1]["overflow_count"],
+            "da_lead_overflow_count": r["da"][1]["overflow_count"],
             # analysis-window diagnostics (report-only)
             "bg_window_diagnostic_steps_rate": dev_bg_win["diagnostic_steps_rate"],
             "da_window_diagnostic_steps_rate": dev_da_win["diagnostic_steps_rate"],
