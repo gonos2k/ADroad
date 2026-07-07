@@ -95,15 +95,16 @@ def _overlap_errors(by_station):
 
 def validate_manifest(manifest):
     """Validate a whole manifest (dict with a 'cases' list). Never raises — returns a report:
-    {ok, errors, n_cases, n_stations, n_regimes, regimes, minimum_evidence_ready,
-    recommended_promotion_ready, readiness_reasons}.
+    {ok, errors, n_rows, n_cases, n_stations, n_regimes, regimes, regime_counts,
+    minimum_evidence_ready, recommended_promotion_ready, minimum_reasons, recommended_reasons}.
 
     The readiness flags describe the EVIDENCE BASE (how many distinct, non-overlapping,
     regime-diverse cases exist), NOT whether any model is promotable — skill/physics still
     have to beat baseline in every case at run time."""
     if not isinstance(manifest, dict) or not isinstance(manifest.get("cases"), list):
         return {"ok": False, "errors": ["manifest must be a mapping with a 'cases' list"],
-                "n_cases": 0, "minimum_evidence_ready": False,
+                "n_rows": 0, "n_cases": 0, "n_stations": 0, "n_regimes": 0,
+                "regimes": [], "regime_counts": {}, "minimum_evidence_ready": False,
                 "recommended_promotion_ready": False,
                 "minimum_reasons": ["no cases"], "recommended_reasons": ["no cases"]}
     errors, ids, stations = [], set(), set()
