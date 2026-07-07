@@ -10,8 +10,9 @@ The honest columns (per the review): rates over windows, not just mean RMSE. A c
 a good mean that badly breaks ONE window (worst_delta) or raises physics burden
 (physics_worse_rate) is penalized by the ranking, so an "average-only" combo can't win.
 
-Ranking: gate_pass_rate↓ → physics_worse_rate↑ → worst_delta_rmse↑ → mean_delta_rmse↑ →
-state_large_rate↑ (i.e. prefer robust skill AND clean physics, avoid worst-case damage).
+Ranking (best first): gate_pass_rate↑ → physics_worse_rate↓ → worst_delta_rmse↓ →
+mean_delta_rmse↓ → state_large_rate↓ (prefer robust skill AND clean physics, avoid
+worst-case damage). ↑=higher-is-better, ↓=lower-is-better.
 
 Compute is heavy (12 combos × 4 windows = 48 A0 runs), so combos run in SLICES and
 accumulate into reports/forecast_da_fullmodel_grid_partial.json; every run re-renders from
@@ -48,14 +49,25 @@ def _combo_key(bg_w, window, lead):
 
 def summarize_combo(bg_w, window, lead, rows):
     """Aggregate one combo's per-window rows into a grid row (pure). Reuses summarize_multi
-    for the rate/promotion logic, then adds the combo axes + state_large_rate."""
+    for the rate/promotion logic, then adds the combo axes + state_large_rate.
+
+    promotion policy: this is a SINGLE fixture, so promotion_eligible is ALWAYS False here
+    (window reproducibility ≠ independent-case promotion, per design §11). The window-level
+    precondition (all_beat ∧ residual_clean) is preserved separately as
+    window_precondition_met so a 4/4-clean combo is still visible without overclaiming.
+    Empty combos (every window skipped) use None for numeric fields — never inf/NaN, which
+    json.dumps(allow_nan=False) would reject on save/render."""
     key = _combo_key(bg_w, window, lead)
     base = {"key": key, "bg_w": bg_w, "window": window, "lead": lead, "n_valid": len(rows)}
     if not rows:
-        return {**base, "gate_pass_rate": 0.0, "physics_worse_rate": 1.0,
-                "worst_delta_rmse": float("inf"), "mean_delta_rmse": float("inf"),
-                "state_large_rate": 1.0, "residual_clean": False,
-                "promotion_eligible": False, "promotion": "REPORT_ONLY"}
+        return {**base, "gate_pass_n": 0, "gate_pass_rate": 0.0,
+                "skill_improved_n": 0, "skill_improved_rate": 0.0,
+                "physics_worse_n": 0, "physics_worse_rate": 1.0,
+                "state_large_n": 0, "state_large_rate": 1.0,
+                "mean_delta_rmse": None, "worst_delta_rmse": None, "max_lead_diag_delta": None,
+                "max_residual": None, "residual_clean": False,
+                "window_precondition_met": False, "promotion_eligible": False,
+                "promotion": "REPORT_ONLY"}
     s = summarize_multi(rows)
     n = s["n_valid"]
     return {**base,
@@ -66,21 +78,47 @@ def summarize_combo(bg_w, window, lead, rows):
             "mean_delta_rmse": s["mean_delta"], "worst_delta_rmse": s["worst_delta"],
             "max_lead_diag_delta": s["max_lead_diag_delta"],
             "max_residual": s["max_residual"], "residual_clean": s["residual_clean"],
-            "promotion_eligible": s["promotion_eligible"], "promotion": s["promotion"][0]}
+            "window_precondition_met": s["promotion_eligible"],   # all_beat ∧ residual_clean
+            "promotion_eligible": False,                          # single-fixture grid: never
+            "promotion": s["promotion"][0]}
+
+
+def _bad_high(x):
+    """None (empty combo) sorts as worst on a lower-is-better key."""
+    return math.inf if x is None else x
 
 
 def rank_rows(rows):
     """Prefer robust skill AND clean physics; punish worst-case damage. An average-only
-    combo that breaks one window (worst_delta) or raises burden (physics_worse) is demoted."""
+    combo that breaks one window (worst_delta) or raises burden (physics_worse) is demoted.
+    Ranking: gate_pass_rate↑ → physics_worse_rate↓ → worst_delta↓ → mean_delta↓ → state_large_rate↓."""
     return sorted(rows, key=lambda r: (
         -r.get("gate_pass_rate", 0.0), r.get("physics_worse_rate", 1.0),
-        r.get("worst_delta_rmse", math.inf), r.get("mean_delta_rmse", math.inf),
+        _bad_high(r.get("worst_delta_rmse")), _bad_high(r.get("mean_delta_rmse")),
         r.get("state_large_rate", 1.0)))
 
 
 _COLS = ("bg_w", "window", "lead", "n_valid", "gate_pass_rate", "skill_improved_rate",
          "physics_worse_rate", "state_large_rate", "mean_delta_rmse", "worst_delta_rmse",
-         "max_lead_diag_delta", "max_residual", "residual_clean", "promotion_eligible")
+         "max_lead_diag_delta", "max_residual", "residual_clean", "window_precondition_met")
+
+
+# axes are always present numbers; metric fields may be None for an empty combo, so we only
+# require their presence, not finiteness (matching summarize_combo's None-for-empty policy).
+_REQUIRED_GRID_KEYS = set(_COLS) | {"key", "promotion", "promotion_eligible"}
+
+
+def _validate_grid_row(r):
+    if not isinstance(r, dict):
+        raise ValueError("grid row must be a mapping")
+    missing = _REQUIRED_GRID_KEYS - set(r)
+    if missing:
+        raise ValueError(f"grid row missing keys: {sorted(missing)}")
+    for k in ("bg_w", "window", "lead", "n_valid"):     # axes must be real numbers
+        v = r[k]
+        if isinstance(v, bool) or not isinstance(v, (int, float)) or not math.isfinite(v):
+            raise ValueError(f"grid row {k} must be a finite number")
+    return r
 
 
 def _load_partial():
@@ -91,9 +129,9 @@ def _load_partial():
         if blob.get("schema_version") != _SCHEMA or blob.get("config") != _CONFIG:
             print(f"  [warn] stale grid partial ({PARTIAL.name}) — schema/config mismatch, ignoring")
             return {}
-        return {r["key"]: r for r in blob["rows"]}
+        return {_validate_grid_row(r)["key"]: r for r in blob["rows"]}
     except (ValueError, KeyError, TypeError, AttributeError) as e:
-        print(f"  [warn] unreadable grid partial ({PARTIAL.name}) — ignoring ({e})")
+        print(f"  [warn] unreadable/incomplete grid partial ({PARTIAL.name}) — ignoring ({e})")
         return {}
 
 

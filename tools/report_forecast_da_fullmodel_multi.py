@@ -67,13 +67,18 @@ def default_k0s():
 def run_windows(window=WINDOW, lead=LEAD, bg_w=BG_WEIGHT, k0s=None):
     """Run A0 over a set of analysis windows and return per-window case rows (jax, heavy).
     Reusable building block: the grid tool calls this per (bg_w, window, lead) combo.
-    Windows with too few valid obs are skipped (build_a0 raises RuntimeError)."""
+    Only 'too few valid obs' windows are skipped (with a printed reason) — any OTHER
+    RuntimeError (range guard, rollout failure) is re-raised so a real bug can't silently
+    masquerade as an empty combo."""
     rows = []
     for k0 in (default_k0s() if k0s is None else k0s):
         try:
             r = build_a0(k0=k0, window=window, lead=lead, bg_w=bg_w)
-        except RuntimeError:
-            continue
+        except RuntimeError as e:
+            if "too few valid obs" in str(e):
+                print(f"    [skip] k0={k0} window={window} lead={lead}: {e}")
+                continue
+            raise
         rows.append(_case_row(r))
     return rows
 
