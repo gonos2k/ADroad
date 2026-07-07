@@ -88,6 +88,11 @@ def _bad_high(x):
     return math.inf if x is None else x
 
 
+def _fmt_delta(x):
+    """Format a Δrmse that may be None (an all-skipped empty combo) without crashing."""
+    return "NA" if x is None else f"{x:+.4f}"
+
+
 def rank_rows(rows):
     """Prefer robust skill AND clean physics; punish worst-case damage. An average-only
     combo that breaks one window (worst_delta) or raises burden (physics_worse) is demoted.
@@ -108,6 +113,13 @@ _COLS = ("bg_w", "window", "lead", "n_valid", "gate_pass_rate", "skill_improved_
 _REQUIRED_GRID_KEYS = set(_COLS) | {"key", "promotion", "promotion_eligible"}
 
 
+# metric fields may be None (empty combo); when present they must be finite numbers.
+_NUMERIC_OR_NONE_GRID_KEYS = {"gate_pass_rate", "skill_improved_rate", "physics_worse_rate",
+                              "state_large_rate", "mean_delta_rmse", "worst_delta_rmse",
+                              "max_lead_diag_delta", "max_residual"}
+_BOOL_GRID_KEYS = {"residual_clean", "window_precondition_met", "promotion_eligible"}
+
+
 def _validate_grid_row(r):
     if not isinstance(r, dict):
         raise ValueError("grid row must be a mapping")
@@ -118,6 +130,14 @@ def _validate_grid_row(r):
         v = r[k]
         if isinstance(v, bool) or not isinstance(v, (int, float)) or not math.isfinite(v):
             raise ValueError(f"grid row {k} must be a finite number")
+    for k in _NUMERIC_OR_NONE_GRID_KEYS:                 # None ok (empty combo), else finite
+        v = r[k]
+        if v is not None and (isinstance(v, bool) or not isinstance(v, (int, float))
+                              or not math.isfinite(v)):
+            raise ValueError(f"grid row {k} must be a finite number or None")
+    for k in _BOOL_GRID_KEYS:
+        if not isinstance(r[k], bool):
+            raise ValueError(f"grid row {k} must be bool")
     return r
 
 
@@ -174,7 +194,7 @@ def render(store):
                   f"- 최상위: bg_w={best['bg_w']} window={best['window']} lead={best['lead']} "
                   f"(gate_pass_rate={best.get('gate_pass_rate', 0):.2f}, "
                   f"physics_worse_rate={best.get('physics_worse_rate', 0):.2f}, "
-                  f"worst_delta={best.get('worst_delta_rmse', float('nan')):+.4f})",
+                  f"worst_delta={_fmt_delta(best.get('worst_delta_rmse'))})",
                   "- 해석축: 짧은 window vs 긴 window, lead↑에 따른 state memory 소실, bg_w↓의 overfit/state_large, "
                   "bg_w↑의 DA 효과 소실. grid 최적값은 결론이 아니라 독립-case(Step 4) 실험의 탐색 범위."]
     (outdir / "forecast_da_fullmodel_grid.md").write_text("\n".join(lines) + "\n", encoding="utf-8")
@@ -217,7 +237,7 @@ def main():
             print(f"  combo {idx:2d} bg_w={bw} window={wdw} lead={ld}: "
                   f"gate_pass_rate={combo.get('gate_pass_rate', 0):.2f} "
                   f"physics_worse_rate={combo.get('physics_worse_rate', 0):.2f} "
-                  f"worst_delta={combo.get('worst_delta_rmse', float('nan')):+.4f}")
+                  f"worst_delta={_fmt_delta(combo.get('worst_delta_rmse'))}")
     rows = render(store)
     print(f"wrote reports/forecast_da_fullmodel_grid.{{md,csv}} + meta "
           f"({len(rows)}/{len(COMBOS)} combos)")

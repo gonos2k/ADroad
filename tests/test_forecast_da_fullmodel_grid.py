@@ -119,6 +119,28 @@ def test_render_meta_allow_nan_false(tmp_path, monkeypatch):
     assert len(by_key[(0.05, 120, 480)]["windows"]) == 2
 
 
+def test_render_only_empty_combo_does_not_crash(tmp_path, monkeypatch):
+    # a combo where every window was skipped -> None deltas; render()/format must not crash.
+    import tools.report_forecast_da_fullmodel_grid as mod
+    monkeypatch.setattr(mod, "REPO", tmp_path)
+    (tmp_path / "reports").mkdir()
+    empty = summarize_combo(0.2, 60, 240, []); empty["windows"] = []
+    mod.render({empty["key"]: empty})                    # must not raise (None worst_delta)
+    md = (tmp_path / "reports" / "forecast_da_fullmodel_grid.md").read_text()
+    assert "worst_delta=NA" in md
+
+
+def test_load_partial_rejects_value_corrupt_grid_row(tmp_path, monkeypatch):
+    import tools.report_forecast_da_fullmodel_grid as mod
+    p = tmp_path / "grid_partial.json"
+    monkeypatch.setattr(mod, "PARTIAL", p)
+    good = summarize_combo(0.05, 120, 480, [_win(1500, 0.18, 0.22, True, False)])
+    bad_bool = dict(good, residual_clean="yes")          # non-bool flag
+    p.write_text(json.dumps({"schema_version": mod._SCHEMA, "config": mod._CONFIG,
+                             "rows": [bad_bool]}))
+    assert mod._load_partial() == {}
+
+
 def test_cols_present_in_row():
     c = summarize_combo(0.05, 120, 480, [_win(1500, 0.18, 0.22, True, False)])
     assert set(_COLS).issubset(c.keys())
