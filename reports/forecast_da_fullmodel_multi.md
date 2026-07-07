@@ -15,7 +15,8 @@ windows: k0=1500+i×600 (i<4) · 동화창 120 · lead 480 · bg_w 0.05. promoti
 - gate PASS: 2/4 (rate 0.50) · beats-all=False
 - skill 개선: 2/4 (rate 0.50) · physics_worse: 0/4 (rate 0.00)
 - state_correction_large: 0/4 · mean Δrmse +0.0240 · worst Δrmse +0.1183 (Δrmse=DA−BG, 클수록 나쁨 → worst=max)
-- max lead diag_rate(DA): 0.0333 · max residual 1.73e-18 (clean=True)
+- max lead diag_rate(DA): 0.0333 · max lead diag Δ(DA−BG): +0.0000 (≤0이면 DA가 baseline보다 burden 안 늘림) · max residual 1.73e-18 (clean=True)
+- promotion_eligible(all_beat ∧ residual_clean): False
 - **promotion: REPORT_ONLY** — insufficient cases: 1 < 3 (report-only); does not beat baseline in every window
 
 해석: gate_pass_rate<1이면 DA가 매 window를 이기지 못한 것(regime-dependent). physics_worse_rate>0이면 일부 window에서 열 보정이 물리 부담을 키운 것 — skill이 좋아도 그 window는 FAIL해야 정직. residual이 clean하면 실패 원인은 accounting leak이 아니라 deviation burden이다.

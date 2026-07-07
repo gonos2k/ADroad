@@ -19,8 +19,10 @@
     "mean_delta": 0.02404662890524204,
     "worst_delta": 0.11825639374771402,
     "max_lead_diag_da": 0.03333333333333333,
+    "max_lead_diag_delta": 0.0,
     "max_residual": 1.734723475976807e-18,
-    "residual_clean": true
+    "residual_clean": true,
+    "promotion_eligible": false
   },
   "promotion": "REPORT_ONLY",
   "promotion_reasons": [

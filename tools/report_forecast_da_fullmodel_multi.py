@@ -88,7 +88,13 @@ def summarize_multi(rows, residual_atol=1e-9):
             "state_large_n": sum(x["state_large"] for x in rows),
             "mean_delta": _mean(deltas), "worst_delta": max(deltas),
             "max_lead_diag_da": max(x["lead_diag_da"] for x in rows),
+            # baseline-relative: the physics gate is DA-vs-baseline, so a delta<=0 means DA
+            # never added burden even where absolute diag>0 (e.g. k0=3300 bg==da==0.0333).
+            "max_lead_diag_delta": max(x["lead_diag_da"] - x["lead_diag_bg"] for x in rows),
             "max_residual": max_resid, "residual_clean": residual_clean,
+            # all_beat keeps its skill+physics meaning; promotion_eligible folds in the
+            # clean-residual precondition so downstream can't read all_beat=True as promotable.
+            "promotion_eligible": bool(all_beat and residual_clean),
             "promotion": (verdict, reasons)}
 
 
@@ -103,11 +109,25 @@ _COLS = ("k0", "bg_rmse", "da_rmse", "rmse_delta", "skill_improved", "gate_pass"
 _SCHEMA = 1
 _CONFIG = {"k0_first": K0_FIRST, "stride": STRIDE, "window": WINDOW, "lead": LEAD,
            "bg_weight": BG_WEIGHT}
+# every field _case_row produces; render()/summarize_multi() depend on all of them, so a
+# schema-matching but shape-incomplete row must be rejected (not just old-schema partials).
+_REQUIRED_ROW_KEYS = set(_COLS) | {"dx_l2", "dx_max_abs"}
+
+
+def _validate_partial_row(r):
+    if not isinstance(r, dict):
+        raise ValueError("partial row must be a mapping")
+    missing = _REQUIRED_ROW_KEYS - set(r)
+    if missing:
+        raise ValueError(f"partial row missing keys: {sorted(missing)}")
+    int(r["k0"])                                   # k0 must be an integer index
+    return r
 
 
 def _load_partial():
-    """Load accumulated windows, but IGNORE a stale partial (old schema or different
-    config) — a runner resuming across config changes must not mix incompatible rows."""
+    """Load accumulated windows, but IGNORE a partial that is stale (old schema / different
+    config) OR shape-incomplete (a row missing fields render() needs) — a resuming runner
+    must never mix incompatible rows or crash downstream on a corrupt row."""
     if not PARTIAL.exists():
         return {}
     try:
@@ -115,9 +135,9 @@ def _load_partial():
         if blob.get("schema_version") != _SCHEMA or blob.get("config") != _CONFIG:
             print(f"  [warn] stale partial ({PARTIAL.name}) — schema/config mismatch, ignoring")
             return {}
-        return {int(r["k0"]): r for r in blob["rows"]}
-    except (ValueError, KeyError, TypeError, AttributeError):
-        print(f"  [warn] unreadable partial ({PARTIAL.name}) — ignoring")
+        return {int(_validate_partial_row(r)["k0"]): r for r in blob["rows"]}
+    except (ValueError, KeyError, TypeError, AttributeError) as e:
+        print(f"  [warn] unreadable/incomplete partial ({PARTIAL.name}) — ignoring ({e})")
         return {}
 
 
@@ -163,7 +183,10 @@ def render(store):
                   f"mean Δrmse {s['mean_delta']:+.4f} · worst Δrmse {s['worst_delta']:+.4f} "
                   "(Δrmse=DA−BG, 클수록 나쁨 → worst=max)",
                   f"- max lead diag_rate(DA): {s['max_lead_diag_da']:.4f} · "
+                  f"max lead diag Δ(DA−BG): {s['max_lead_diag_delta']:+.4f} (≤0이면 DA가 baseline보다 "
+                  "burden 안 늘림) · "
                   f"max residual {s['max_residual']:.2e} (clean={s['residual_clean']})",
+                  f"- promotion_eligible(all_beat ∧ residual_clean): {s['promotion_eligible']}",
                   f"- **promotion: {verdict}** — {'; '.join(reasons)}",
                   "", "해석: gate_pass_rate<1이면 DA가 매 window를 이기지 못한 것(regime-dependent). "
                   "physics_worse_rate>0이면 일부 window에서 열 보정이 물리 부담을 키운 것 — skill이 좋아도 그 window는 "
@@ -189,10 +212,14 @@ def main():
     args = ap.parse_args()
     if args.start < 0 or args.count < 0:
         ap.error("--start and --count must be non-negative")
+    if not args.render and args.count == 0:
+        ap.error("--count must be positive (use --render to only re-render)")
     if not args.render and args.start >= N_WINDOWS:
         ap.error(f"--start must be < N_WINDOWS ({N_WINDOWS}); use --render to only re-render")
 
     store = _load_partial()
+    if args.render and not store:                  # don't overwrite a good report with 0 rows
+        ap.error("no valid partial rows to render (partial missing/stale/incomplete)")
     if not args.render:
         for i in range(args.start, min(args.start + args.count, N_WINDOWS)):
             k0 = K0_FIRST + i * STRIDE
