@@ -119,6 +119,15 @@ def test_safe_tag_sanitizes_filename_unsafe_chars():
     assert _safe_tag("") == "" and _safe_tag(None) == ""         # empty -> default upstream
 
 
+def test_main_rejects_tag_that_sanitizes_to_empty(monkeypatch):
+    # a non-empty --tag made of only unsafe chars would sanitize to "" and silently
+    # overwrite the default artifact; main() must reject it (before any model run).
+    import tools.report_forecast_da_fullmodel as mod
+    monkeypatch.setattr(sys, "argv", ["prog", "--tag", "///"])
+    with pytest.raises(SystemExit):
+        mod.main()
+
+
 def test_build_a0_rejects_bad_dx_scale():
     from tools.report_forecast_da_fullmodel import build_a0
     # validated before any model run: non-positive, non-finite, and bool/string (numeric policy)

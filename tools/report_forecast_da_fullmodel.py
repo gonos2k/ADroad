@@ -221,10 +221,12 @@ def main():
     ap.add_argument("--dx-scale", type=float, default=1.0, dest="dx_scale",
                     help=">1이면 stress 모드(dx를 인위적으로 확대해 lead 물리부담 gate 검증)")
     args = ap.parse_args()
+    safe_tag = _safe_tag(args.tag)
+    if args.tag and not safe_tag:            # non-empty tag that sanitizes away would
+        ap.error("--tag contains no filename-safe characters (would overwrite default artifact)")
     r = build_a0(args.k0, args.window, args.lead, args.bg_w, args.dx_scale)
     rows = _rows(r)
     outdir = REPO / "reports"; outdir.mkdir(exist_ok=True)
-    safe_tag = _safe_tag(args.tag)
     suffix = f"_{safe_tag}" if safe_tag else ""
     case_id = safe_tag or "default"
 
