@@ -12,10 +12,10 @@ from tools.run_cases import (  # noqa: E402
 
 
 def _row(cid="c", regime="dry_cold", gate_pass=True, physics_worse=False,
-         residual_clean=True, state_large=False, rmse_delta=-0.02, max_residual=0.0):
+         state_large=False, rmse_delta=-0.02, max_residual=0.0):
     return {"case_id": cid, "regime": regime, "gate_pass": gate_pass,
-            "physics_worse": physics_worse, "residual_clean": residual_clean,
-            "state_large": state_large, "rmse_delta": rmse_delta, "max_residual": max_residual}
+            "physics_worse": physics_worse, "state_large": state_large,
+            "rmse_delta": rmse_delta, "max_residual": max_residual}
 
 
 def _mcase(cid, station, day, regime="dry_cold"):
@@ -25,7 +25,8 @@ def _mcase(cid, station, day, regime="dry_cold"):
 
 def test_make_setting_validates():
     assert make_setting(0.05, 60, 480) == {"bg_w": 0.05, "window": 60, "lead": 480}
-    for bad in [(0.0, 60, 480), (0.05, 0, 480), (True, 60, 480)]:
+    for bad in [(0.0, 60, 480), (0.05, 0, 480), (True, 60, 480),
+                (float("inf"), 60, 480), (0.05, 60.5, 480), (0.05, 60, 480.5)]:
         with pytest.raises(ValueError):
             make_setting(*bad)
 
@@ -52,17 +53,28 @@ def test_too_few_cases_stays_report_only():
 
 
 def test_dirty_residual_blocks_promotion():
-    rows = [_row(cid="a"), _row(cid="b"), _row(cid="c", max_residual=1e-6, residual_clean=False)]
+    rows = [_row(cid="a"), _row(cid="b"), _row(cid="c", max_residual=1e-6)]
     s = summarize_cases(rows)
     assert s["residual_clean"] is False and s["promotion"][0] == "REPORT_ONLY"
     assert any("aggregate residual" in r for r in s["promotion"][1])
 
 
-def test_case_row_schema_enforced():
+def test_summarize_rejects_duplicate_case_id():
+    with pytest.raises(ValueError):
+        summarize_cases([_row(cid="dup"), _row(cid="dup"), _row(cid="x")])
+
+
+def test_case_row_schema_and_consistency_enforced():
     with pytest.raises(ValueError):
         summarize_cases([{"case_id": "a"}])                      # missing fields
     with pytest.raises(ValueError):
         summarize_cases([dict(_row(), gate_pass="yes")])        # non-bool flag
+    with pytest.raises(ValueError):                             # physics_worse yet gate_pass
+        summarize_cases([dict(_row(), physics_worse=True, gate_pass=True)])
+    with pytest.raises(ValueError):                             # non-finite delta
+        summarize_cases([dict(_row(), rmse_delta=float("nan"))])
+    with pytest.raises(ValueError):                             # negative residual
+        summarize_cases([dict(_row(), max_residual=-1.0)])
 
 
 def test_run_manifest_wires_validate_loop_and_gate():
@@ -87,6 +99,14 @@ def test_run_manifest_refuses_invalid_or_thin_manifest():
     thin = {"cases": [_mcase("a", "sa", 1)]}                    # schema-clean but <3 cases
     with pytest.raises(ValueError):
         run_manifest(thin, make_setting(0.05, 60, 480), run_one=lambda c, s: _row())
+
+
+def test_run_manifest_rejects_bad_require_value():
+    cases = [_mcase("a", "sa", 1), _mcase("b", "sb", 2, "warm_wet"),
+             _mcase("c", "sc", 3, "precip_snow")]
+    with pytest.raises(ValueError):
+        run_manifest({"cases": cases}, make_setting(0.05, 60, 480),
+                     run_one=lambda c, s: _row(), require="none")
 
 
 def test_default_run_one_is_not_implemented():

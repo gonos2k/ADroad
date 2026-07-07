@@ -16,6 +16,7 @@ next increment; the honest contract (aggregate -> promotion_gate) is locked here
     # once a per-case loader + real manifest exist:
     #   python3 tools/run_cases.py cases.yaml --bg-w 0.05 --window 60 --lead 480
 """
+import math
 import sys
 from pathlib import Path
 
@@ -24,27 +25,45 @@ sys.path.insert(0, str(REPO))
 from droad.skill_gate import promotion_gate  # noqa: E402
 from tools.validate_cases import validate_manifest  # noqa: E402
 
-# case row fields a run_one implementation must return (per case):
-CASE_FIELDS = ("case_id", "regime", "gate_pass", "physics_worse", "residual_clean",
-               "state_large", "rmse_delta", "max_residual")
+# case row fields a run_one implementation must return (per case). residual_clean is NOT an
+# input — it is derived from max_residual so a row can't disagree with itself.
+CASE_FIELDS = ("case_id", "regime", "gate_pass", "physics_worse", "state_large",
+               "rmse_delta", "max_residual")
+_BOOL_FIELDS = ("gate_pass", "physics_worse", "state_large")
+
+
+def _finite(name, x):
+    if isinstance(x, bool) or not isinstance(x, (int, float)) or not math.isfinite(x):
+        raise ValueError(f"{name} must be a finite number")
+    return float(x)
 
 
 def make_setting(bg_w, window, lead):
     """A frozen A0 hyperparameter setting (chosen from the grid stability region)."""
-    for name, v in (("bg_w", bg_w), ("window", window), ("lead", lead)):
-        if isinstance(v, bool) or not isinstance(v, (int, float)):
-            raise ValueError(f"setting {name} must be numeric")
+    bg_w = _finite("bg_w", bg_w)
+    for name, v in (("window", window), ("lead", lead)):
+        if isinstance(v, bool) or not isinstance(v, (int, float)) or int(v) != v:
+            raise ValueError(f"setting {name} must be an integer number of steps")
     if not (bg_w > 0 and window > 0 and lead > 0):
         raise ValueError("setting bg_w/window/lead must be positive")
-    return {"bg_w": float(bg_w), "window": int(window), "lead": int(lead)}
+    return {"bg_w": bg_w, "window": int(window), "lead": int(lead)}
 
 
 def _validate_case_row(r):
+    """Strict per-case validation — this feeds a real PROMOTE verdict, so an injected run_one
+    returning an inconsistent row must be rejected, not silently promoted."""
     if not isinstance(r, dict) or set(CASE_FIELDS) - set(r):
         raise ValueError(f"case result must have fields {CASE_FIELDS}")
-    for k in ("gate_pass", "physics_worse", "residual_clean", "state_large"):
+    for k in _BOOL_FIELDS:
         if not isinstance(r[k], bool):
             raise ValueError(f"case result {k!r} must be bool")
+    # the core honesty contract: a case that worsened physics cannot also 'pass' the gate.
+    if r["physics_worse"] and r["gate_pass"]:
+        raise ValueError(f"case {r['case_id']!r} inconsistent: physics_worse=True requires "
+                         "gate_pass=False")
+    _finite("rmse_delta", r["rmse_delta"])
+    if _finite("max_residual", r["max_residual"]) < 0:
+        raise ValueError(f"case {r['case_id']!r} max_residual must be non-negative")
     return r
 
 
@@ -57,6 +76,9 @@ def summarize_cases(rows, residual_atol=1e-9):
     n = len(rows)
     if n == 0:
         return {"n_cases": 0, "promotion": ("REPORT_ONLY", ["no cases"])}
+    ids = [r["case_id"] for r in rows]
+    if len(set(ids)) != n:                      # n_cases must be UNIQUE independent cases
+        raise ValueError("duplicate case_id in case results (n_cases must be unique)")
     wins = sum(r["gate_pass"] for r in rows)
     all_beat = wins == n
     max_resid = max(r["max_residual"] for r in rows)
@@ -86,6 +108,8 @@ def run_manifest(manifest, setting, run_one=_run_one_not_implemented, require="m
     """Validate the manifest, run `run_one(case, setting)` for each case, aggregate.
     Refuses to run unless the manifest is schema-valid and meets the required evidence tier
     (so promotion can't be attempted on a too-thin/invalid base). Returns (summary, rows)."""
+    if require not in ("minimum", "recommended"):
+        raise ValueError("require must be 'minimum' or 'recommended'")
     rep = validate_manifest(manifest)
     if not rep["ok"]:
         raise ValueError(f"invalid manifest: {rep['errors']}")
@@ -109,7 +133,11 @@ def main(argv=None):
     import yaml
     manifest = yaml.safe_load(Path(args.manifest).read_text())
     setting = make_setting(args.bg_w, args.window, args.lead)
-    summary, _ = run_manifest(manifest, setting, require=args.require)   # will raise until loader wired
+    try:
+        summary, _ = run_manifest(manifest, setting, require=args.require)
+    except NotImplementedError as e:            # per-case loader not wired yet (skeleton)
+        print(f"ERROR {e}", file=sys.stderr)
+        return 2
     verdict, reasons = summary["promotion"]
     print(f"n_cases={summary['n_cases']} all_beat={summary['all_beat']} "
           f"physics_worse_rate={summary['physics_worse_rate']:.2f} "
