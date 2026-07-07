@@ -194,6 +194,12 @@ def _rows(r):
     ]
 
 
+def _safe_tag(tag):
+    """Filename-safe case tag: collapse non [A-Za-z0-9_.-] runs, trim leading/trailing ._"""
+    import re
+    return re.sub(r"[^A-Za-z0-9_.-]+", "_", str(tag or "")).strip("._")
+
+
 def main():
     import argparse
     ap = argparse.ArgumentParser(description="Design A0 full-model forecast DA prototype")
@@ -208,8 +214,9 @@ def main():
     r = build_a0(args.k0, args.window, args.lead, args.bg_w, args.dx_scale)
     rows = _rows(r)
     outdir = REPO / "reports"; outdir.mkdir(exist_ok=True)
-    suffix = f"_{args.tag}" if args.tag else ""
-    case_id = args.tag or "default"
+    safe_tag = _safe_tag(args.tag)
+    suffix = f"_{safe_tag}" if safe_tag else ""
+    case_id = safe_tag or "default"
 
     import csv as _csv, io as _io
     buf = _io.StringIO(); w = _csv.writer(buf); w.writerow(_COLS)
@@ -240,7 +247,8 @@ def main():
               f"da {dev_da_lead['diagnostic_steps_rate']:.4f}  ·  **window(report-only)**: "
               f"bg {dev_bg_win['diagnostic_steps_rate']:.4f} / da {dev_da_win['diagnostic_steps_rate']:.4f}",
               f"- state_correction_large (dx_l2>3 또는 max|dx|>2): {dx_large} "
-              f"(dx_l2={r['dx_l2']:.3f}, max|dx|={r['dx_max_abs']:.3f})",
+              f"(dx_l2={r['dx_l2']:.3f}, max|dx|={r['dx_max_abs']:.3f}) "
+              f"— report-only 진단(gate 아님); multi-window/grid에서 반복되면 bg_w↑ 또는 overfit signal로 해석",
               f"- Δover_melt: {r['delta']['delta_over_melt_count']} · Δoverflow: {r['delta']['delta_overflow_count']} · "
               f"Δdiag_rate: {r['delta']['delta_diagnostic_steps_rate']:+.4f}",
               f"- state correction dx (layers 1:5): [{', '.join(f'{v:+.3f}' for v in r['dx'])}] "

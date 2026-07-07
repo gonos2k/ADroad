@@ -14,7 +14,7 @@ k0=3800 · 동화창 120 · 예보 lead 480 valid obs 480개. raw dx at k0 (A0).
 - Δrmse (DA − background): -0.1368  (개선)
 - physics_worse (over_melt/overflow/rate 악화 여부): **True**
 - diag_steps_rate — **lead(primary gate)**: bg 0.0000 / da 0.3250  ·  **window(report-only)**: bg 0.0417 / da 0.1333
-- state_correction_large (dx_l2>3 또는 max|dx|>2): True (dx_l2=40.970, max|dx|=35.724)
+- state_correction_large (dx_l2>3 또는 max|dx|>2): True (dx_l2=40.970, max|dx|=35.724) — report-only 진단(gate 아님); multi-window/grid에서 반복되면 bg_w↑ 또는 overfit signal로 해석
 - Δover_melt: 0.0 · Δoverflow: 0.0 · Δdiag_rate: +0.3250
 - state correction dx (layers 1:5): [+1.167, +5.006, +35.724, +19.388] (l2=40.970, max|dx|=35.724)
 

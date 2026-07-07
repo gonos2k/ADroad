@@ -110,6 +110,15 @@ def test_inject_dx_syncs_tsurfave_and_isolates_state():
     assert surf_bg.TsurfAve == s.TsurfAve
 
 
+def test_safe_tag_sanitizes_filename_unsafe_chars():
+    from tools.report_forecast_da_fullmodel import _safe_tag
+    assert _safe_tag("storage_active") == "storage_active"      # safe passes through
+    assert _safe_tag("../../etc/passwd") == "etc_passwd"         # no path traversal
+    assert _safe_tag("a b/c") == "a_b_c"                         # spaces & slash collapsed
+    assert _safe_tag("__x__") == "x"                             # trims leading/trailing ._
+    assert _safe_tag("") == "" and _safe_tag(None) == ""         # empty -> default upstream
+
+
 def test_build_a0_rejects_bad_dx_scale():
     from tools.report_forecast_da_fullmodel import build_a0
     for bad in (0.0, -1.0, float("nan")):                # validated before any model run
