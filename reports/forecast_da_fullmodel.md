@@ -24,4 +24,4 @@ k0=2000 · 동화창 120 · 예보 lead 480 valid obs 480개 · dx_scale=1. raw 
 
 **주의**: diagnostic 활동이 window(report-only)에서만 발생하고 lead(primary gate)에서 0이면, 이 case는 'storage-active signal은 있으나 lead deviation gate는 clean'이다 — lead gate가 실제 burden 증가를 처리했다는 증거는 아니다(그건 lead 구간에 diagnostics가 발생하는 window/stress 필요).
 
-해석: DA가 lead 예보 RMSE를 낮추면서(gate PASS) physics_worse=False면 열 보정이 full 예보에서 살아남고 물리 부담도 clean. physics_worse=True면 열을 맞추려다 융해/상전이를 왜곡한 것 → 설계 C 신호.
+해석: DA가 lead 예보 RMSE를 낮추면서(gate PASS) physics_worse=False면 열 보정이 full 예보에서 살아남고 물리 부담도 clean(열을 맞추면서 융해/상전이도 왜곡하지 않음).

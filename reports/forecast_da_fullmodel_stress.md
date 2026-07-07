@@ -26,4 +26,4 @@ k0=3800 · 동화창 120 · 예보 lead 480 valid obs 480개 · dx_scale=15. raw
 
 **stress 해석**: lead(primary gate)에서 DA diagnostic burden이 background보다 증가했다 (da 0.3250 > bg 0.0000). 따라서 RMSE가 개선되어도 skill_gate가 FAIL한다 — 이것이 의도한 end-to-end gate 검증(정직성 계약)이다.
 
-해석: DA가 lead 예보 RMSE를 낮추면서(gate PASS) physics_worse=False면 열 보정이 full 예보에서 살아남고 물리 부담도 clean. physics_worse=True면 열을 맞추려다 융해/상전이를 왜곡한 것 → 설계 C 신호.
+해석: 이 artifact는 RMSE가 개선되어도(DA<bg) lead physics burden이 악화되면 gate가 FAIL한다는 정직성 계약을 검증한다 — 실제 DA 성능 주장에는 사용하지 않는다(→ 설계 C: 열 보정이 융해/상전이를 왜곡).

@@ -287,8 +287,13 @@ def main():
         lines += ["**주의**: diagnostic 활동이 window(report-only)에서만 발생하고 lead(primary gate)에서 0이면, "
                   "이 case는 'storage-active signal은 있으나 lead deviation gate는 clean'이다 — lead gate가 실제 "
                   "burden 증가를 처리했다는 증거는 아니다(그건 lead 구간에 diagnostics가 발생하는 window/stress 필요)."]
-    lines += ["", "해석: DA가 lead 예보 RMSE를 낮추면서(gate PASS) physics_worse=False면 열 보정이 full 예보에서 "
-              "살아남고 물리 부담도 clean. physics_worse=True면 열을 맞추려다 융해/상전이를 왜곡한 것 → 설계 C 신호."]
+    if r["physics_worse"]:
+        lines += ["", "해석: 이 artifact는 RMSE가 개선되어도(DA<bg) lead physics burden이 악화되면 gate가 "
+                  "FAIL한다는 정직성 계약을 검증한다 — 실제 DA 성능 주장에는 사용하지 않는다(→ 설계 C: 열 보정이 "
+                  "융해/상전이를 왜곡)."]
+    else:
+        lines += ["", "해석: DA가 lead 예보 RMSE를 낮추면서(gate PASS) physics_worse=False면 열 보정이 full 예보에서 "
+                  "살아남고 물리 부담도 clean(열을 맞추면서 융해/상전이도 왜곡하지 않음)."]
     (outdir / f"forecast_da_fullmodel{suffix}.md").write_text("\n".join(lines) + "\n", encoding="utf-8")
     (outdir / f"forecast_da_fullmodel{suffix}.csv").write_text(buf.getvalue(), encoding="utf-8")
 
