@@ -105,6 +105,15 @@ def test_load_partial_ignores_stale_or_bad(tmp_path, monkeypatch):
     good = _case_row(_result(1500, 0.20, 0.22, gate_ok=True, physics_worse=False))
     p.write_text(json.dumps({"schema_version": mod._SCHEMA, "config": mod._CONFIG, "rows": [good]}))
     assert set(mod._load_partial().keys()) == {1500}
+    # value-corrupt rows are rejected too: non-finite number and non-bool flag
+    bad_num = dict(good, resid_da=float("nan"))
+    p.write_text(json.dumps({"schema_version": mod._SCHEMA, "config": mod._CONFIG,
+                             "rows": [bad_num]}))
+    assert mod._load_partial() == {}
+    bad_flag = dict(good, gate_pass="True")
+    p.write_text(json.dumps({"schema_version": mod._SCHEMA, "config": mod._CONFIG,
+                             "rows": [bad_flag]}))
+    assert mod._load_partial() == {}
 
 
 @pytest.mark.jax

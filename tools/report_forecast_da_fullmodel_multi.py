@@ -26,6 +26,7 @@ every run re-renders the report from all windows gathered so far.
 Writes reports/forecast_da_fullmodel_multi.{md,csv} + _meta.json. Requires jax.
 """
 import json
+import math
 import sys
 from pathlib import Path
 
@@ -57,6 +58,24 @@ def _case_row(r):
             "win_diag_da": dev_da_win["diagnostic_steps_rate"],
             "resid_bg": dev_bg["max_primary_residual"], "resid_da": dev_da["max_primary_residual"],
             "dx_l2": r["dx_l2"], "dx_max_abs": r["dx_max_abs"]}
+
+
+def default_k0s():
+    return [K0_FIRST + i * STRIDE for i in range(N_WINDOWS)]
+
+
+def run_windows(window=WINDOW, lead=LEAD, bg_w=BG_WEIGHT, k0s=None):
+    """Run A0 over a set of analysis windows and return per-window case rows (jax, heavy).
+    Reusable building block: the grid tool calls this per (bg_w, window, lead) combo.
+    Windows with too few valid obs are skipped (build_a0 raises RuntimeError)."""
+    rows = []
+    for k0 in (default_k0s() if k0s is None else k0s):
+        try:
+            r = build_a0(k0=k0, window=window, lead=lead, bg_w=bg_w)
+        except RuntimeError:
+            continue
+        rows.append(_case_row(r))
+    return rows
 
 
 def summarize_multi(rows, residual_atol=1e-9):
@@ -111,16 +130,28 @@ _CONFIG = {"k0_first": K0_FIRST, "stride": STRIDE, "window": WINDOW, "lead": LEA
            "bg_weight": BG_WEIGHT}
 # every field _case_row produces; render()/summarize_multi() depend on all of them, so a
 # schema-matching but shape-incomplete row must be rejected (not just old-schema partials).
+_BOOL_ROW_KEYS = {"skill_improved", "gate_pass", "physics_worse", "state_large"}
+_NUMERIC_ROW_KEYS = ({"k0", "bg_rmse", "da_rmse", "rmse_delta", "lead_diag_bg", "lead_diag_da",
+                      "win_diag_bg", "win_diag_da", "resid_bg", "resid_da", "dx_l2", "dx_max_abs"})
 _REQUIRED_ROW_KEYS = set(_COLS) | {"dx_l2", "dx_max_abs"}
 
 
 def _validate_partial_row(r):
+    """Reject a row that is not just shape-incomplete but value-corrupt (a non-finite
+    number or a non-bool flag would crash/mislead summarize_multi's max()/rates)."""
     if not isinstance(r, dict):
         raise ValueError("partial row must be a mapping")
     missing = _REQUIRED_ROW_KEYS - set(r)
     if missing:
         raise ValueError(f"partial row missing keys: {sorted(missing)}")
     int(r["k0"])                                   # k0 must be an integer index
+    for k in _NUMERIC_ROW_KEYS:
+        v = r[k]
+        if isinstance(v, bool) or not math.isfinite(float(v)):   # bool is not a number here
+            raise ValueError(f"partial row {k} must be a finite number")
+    for k in _BOOL_ROW_KEYS:
+        if not isinstance(r[k], bool):
+            raise ValueError(f"partial row {k} must be bool")
     return r
 
 
