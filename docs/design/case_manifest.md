@@ -71,10 +71,19 @@ until it beats baseline.
 - Do not read either readiness flag (`minimum_evidence_ready`, `recommended_promotion_ready`)
   as "the model is promotable" — they are purely about evidence volume/diversity.
 
-## Next increments (not in this skeleton)
+## run_cases (the promotion path)
 
-1. A `run_cases` driver: for each case, run the chosen A0 setting and collect per-case
-   gate/physics/residual, then feed `n_cases`, `windows_beat_baseline`, aggregate deviation to
-   `promotion_gate` for a real (non-`n_cases=1`) verdict.
+`tools/run_cases.py` implements the aggregation + driver: `run_manifest` validates the
+manifest, requires the `minimum`/`recommended` evidence tier, runs `run_one(case, setting)`
+per case, and `summarize_cases` feeds the per-case verdicts to `promotion_gate` with the
+**real n_cases** — so a robust result can finally be `PROMOTE` (the single-fixture tools are
+pinned to `n_cases=1` and can only ever be `REPORT_ONLY`). Every honest block still applies:
+one failing case, too few cases, or a dirty aggregate residual keeps it `REPORT_ONLY`.
+
+Still pending (needs data we don't have yet):
+
+1. A per-case forcing/obs loader for `run_one` — the default raises `NotImplementedError`
+   because only one fixture exists. The aggregate→gate contract is locked and tested; the
+   loader is the remaining wiring once multiple real cases exist.
 2. Pick the A0 setting from the grid stability region (Step 3 result) before running cases, so
    the case study isn't confounded by an untuned `bg_w/window/lead`.
