@@ -147,6 +147,21 @@ def test_cli_bad_setting_returns_error_code_not_traceback(tmp_path, capsys):
     assert "ERROR" in capsys.readouterr().err
 
 
+def test_cli_missing_manifest_returns_error_code_not_traceback(capsys):
+    from tools.run_cases import main
+    assert main(["/no/such/file.yaml", "--bg-w", "0.05", "--window", "60", "--lead", "480"]) == 1
+    assert "ERROR" in capsys.readouterr().err
+
+
+def test_cli_bad_yaml_returns_error_code_not_traceback(tmp_path, capsys):
+    pytest.importorskip("yaml")
+    from tools.run_cases import main
+    p = tmp_path / "bad.yaml"
+    p.write_text("cases: [")                                    # malformed YAML
+    assert main([str(p), "--bg-w", "0.05", "--window", "60", "--lead", "480"]) == 1
+    assert "ERROR" in capsys.readouterr().err
+
+
 def test_default_run_one_is_not_implemented():
     with pytest.raises(NotImplementedError):
         _run_one_not_implemented({"case_id": "a"}, make_setting(0.05, 60, 480))

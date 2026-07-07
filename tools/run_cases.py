@@ -147,7 +147,14 @@ def main(argv=None):
     args = ap.parse_args(argv)
     try:                                         # bad setting / unreadable manifest / thin tier
         import yaml
-        manifest = yaml.safe_load(Path(args.manifest).read_text())
+        try:
+            text = Path(args.manifest).read_text()
+        except OSError as e:
+            raise ValueError(f"cannot read manifest: {e}") from e
+        try:
+            manifest = yaml.safe_load(text)
+        except yaml.YAMLError as e:
+            raise ValueError(f"cannot parse manifest YAML: {e}") from e
         setting = make_setting(args.bg_w, args.window, args.lead)
         summary, _ = run_manifest(manifest, setting, require=args.require)
     except NotImplementedError as e:            # per-case loader not wired yet (skeleton)
