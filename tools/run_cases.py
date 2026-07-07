@@ -72,6 +72,26 @@ def _validate_case_row(r):
     return r
 
 
+def case_row_from_a0(case, a0):
+    """Map a build_a0() result dict to a CASE_FIELDS row (pure). This is the reusable core of
+    a run_one loader — the part that turns model output into the promotion contract, and the
+    part most likely to drift. What still needs real multi-case DATA is only the case ->
+    forcing/obs mapping that build_a0 is run on; this extraction is settled and testable now.
+    Returns a row already passed through _validate_case_row (raises on any inconsistency)."""
+    for k in ("case_id", "regime"):
+        if k not in case:
+            raise ValueError(f"case missing {k!r}")
+    dev_bg, dev_da = a0["bg"][1], a0["da"][1]
+    row = {"case_id": case["case_id"], "regime": case["regime"],
+           "gate_pass": bool(a0["gate_da_vs_bg"][0]),
+           "physics_worse": bool(a0["physics_worse"]),
+           "state_large": bool(a0["dx_max_abs"] > 2.0 or a0["dx_l2"] > 3.0),
+           "rmse_delta": float(a0["rmse_delta_da_minus_bg"]),
+           "max_residual": max(float(dev_bg["max_primary_residual"]),
+                               float(dev_da["max_primary_residual"]))}
+    return _validate_case_row(row)
+
+
 def summarize_cases(rows, residual_atol=1e-9):
     """Aggregate per-case results and call promotion_gate with the REAL n_cases (pure).
 

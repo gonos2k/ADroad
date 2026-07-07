@@ -8,7 +8,16 @@ REPO = Path(__file__).resolve().parent.parent
 sys.path.insert(0, str(REPO))
 from tools.run_cases import (  # noqa: E402
     summarize_cases, run_manifest, make_setting, _run_one_not_implemented, CASE_FIELDS,
+    case_row_from_a0,
 )
+
+
+def _a0(gate_ok=True, physics_worse=False, dx_l2=0.5, dx_max=0.4, delta=-0.02,
+        resid_bg=0.0, resid_da=0.0):
+    return {"gate_da_vs_bg": (gate_ok, [] if gate_ok else ["x"]), "physics_worse": physics_worse,
+            "dx_l2": dx_l2, "dx_max_abs": dx_max, "rmse_delta_da_minus_bg": delta,
+            "bg": ({"rmse": 0.22}, {"max_primary_residual": resid_bg}),
+            "da": ({"rmse": 0.20}, {"max_primary_residual": resid_da})}
 
 
 def _row(cid="c", regime="dry_cold", gate_pass=True, physics_worse=False,
@@ -160,6 +169,39 @@ def test_cli_bad_yaml_returns_error_code_not_traceback(tmp_path, capsys):
     p.write_text("cases: [")                                    # malformed YAML
     assert main([str(p), "--bg-w", "0.05", "--window", "60", "--lead", "480"]) == 1
     assert "ERROR" in capsys.readouterr().err
+
+
+def test_case_row_from_a0_maps_and_validates():
+    case = {"case_id": "s_2026_dry_cold", "regime": "dry_cold"}
+    row = case_row_from_a0(case, _a0(gate_ok=True, physics_worse=False, delta=-0.03,
+                                     resid_bg=0.0, resid_da=1e-12))
+    assert row["case_id"] == "s_2026_dry_cold" and row["regime"] == "dry_cold"
+    assert row["gate_pass"] is True and row["physics_worse"] is False
+    assert row["rmse_delta"] == pytest.approx(-0.03)
+    assert row["max_residual"] == pytest.approx(1e-12)
+    assert set(CASE_FIELDS).issubset(row.keys())
+    # feeds straight into the aggregator
+    assert "n_cases" in summarize_cases([row])
+
+
+def test_case_row_from_a0_flags_state_large_and_stays_consistent():
+    r = case_row_from_a0({"case_id": "x", "regime": "warm_wet"},
+                         _a0(gate_ok=False, physics_worse=True, dx_max=3.5, dx_l2=40.0))
+    assert r["state_large"] is True and r["physics_worse"] is True and r["gate_pass"] is False
+    with pytest.raises(ValueError):                             # missing case metadata
+        case_row_from_a0({"case_id": "x"}, _a0())
+
+
+@pytest.mark.jax
+def test_case_row_from_a0_smoke_on_real_build_a0():
+    # end-to-end: real A0 output -> case row -> aggregator, proving the extraction contract
+    # holds against actual build_a0 (single fixture -> n_cases=1 -> REPORT_ONLY).
+    from tools.report_forecast_da_fullmodel import build_a0
+    a0 = build_a0(k0=2000, window=30, lead=60)
+    row = case_row_from_a0({"case_id": "fixture_k2000", "regime": "dry_cold"}, a0)
+    assert row["max_residual"] < 1e-8                          # full-model audit clean
+    s = summarize_cases([row])
+    assert s["n_cases"] == 1 and s["promotion"][0] == "REPORT_ONLY"
 
 
 def test_default_run_one_is_not_implemented():
