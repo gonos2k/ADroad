@@ -112,6 +112,18 @@ def test_same_station_overlap_is_not_independent():
     assert rep["minimum_evidence_ready"] is False
 
 
+def test_same_station_same_day_non_overlap_allowed():
+    # deliberate policy: same station, same calendar day, but non-overlapping intervals is OK.
+    cases = [
+        _case(cid="A_morning", station="A", start="2026-01-01T00:00:00", end="2026-01-01T06:00:00"),
+        _case(cid="A_afternoon", station="A", start="2026-01-01T12:00:00",
+              end="2026-01-01T18:00:00", regime="warm_wet"),
+    ]
+    rep = validate_manifest({"cases": cases})
+    assert not any("overlapping" in e for e in rep["errors"])
+    assert rep["ok"] is True
+
+
 def test_mixed_timezone_does_not_raise():
     # tz-aware start vs naive end must be reported as an error, not blow up ("never raises")
     rep = validate_manifest({"cases": [
@@ -130,3 +142,19 @@ def test_example_yaml_is_schema_valid():
     rep = validate_manifest(manifest)
     assert rep["ok"] is True                                       # example is schema-clean
     assert set(rep["regimes"]).issubset(REGIMES)
+
+
+def test_cli_require_tier_exit_codes(tmp_path):
+    yaml = pytest.importorskip("yaml")
+    from tools.validate_cases import main
+    # schema-clean but only minimum-ready (3 regimes x1 case each): recommended must fail.
+    cases = [_case(cid="a1", station="a", start="2026-01-01T00:00:00", end="2026-01-01T06:00:00"),
+             _case(cid="b1", station="b", start="2026-01-02T00:00:00", end="2026-01-02T06:00:00",
+                   regime="warm_wet"),
+             _case(cid="c1", station="c", start="2026-01-03T00:00:00", end="2026-01-03T06:00:00",
+                   regime="precip_snow")]
+    p = tmp_path / "cases.yaml"
+    p.write_text(yaml.safe_dump({"cases": cases}))
+    assert main([str(p)]) == 0                                     # schema-clean
+    assert main([str(p), "--require", "minimum"]) == 0            # 3 cases / 2+ regimes
+    assert main([str(p), "--require", "recommended"]) == 1        # <3 per regime

@@ -1,13 +1,16 @@
 #!/usr/bin/env python3
 """Validate a dROAD independent-case manifest (Step 4 toward real promotion).
 
-promotion_gate (design §11) counts a CASE = independent station/day, not a window. This
-turns the case manifest into an executable contract: it checks each case's schema/semantics
-and reports whether the manifest has enough DISTINCT, regime-diverse cases to even attempt
-promotion (n_cases ≥ MIN_CASES, ≥ 2 regimes, no duplicate station-days). It never claims a
-model is promotable — only whether the EVIDENCE BASE is large enough to ask the question.
+promotion_gate (design §11) counts a CASE = one station over one non-overlapping time
+interval, not a window. This turns the case manifest into an executable contract: it checks
+each case's schema/semantics and reports whether the manifest has enough DISTINCT,
+regime-diverse cases to even attempt promotion (two readiness tiers; independence is enforced
+by no overlapping same-station intervals). It never claims a model is promotable — only
+whether the EVIDENCE BASE is large enough to ask the question.
 
-    python3 tools/validate_cases.py cases.yaml        # or cases.example.yaml
+    python3 tools/validate_cases.py cases.yaml                     # schema only (exit!=0 on error)
+    python3 tools/validate_cases.py cases.yaml --require minimum   # also gate on minimum tier
+    python3 tools/validate_cases.py cases.yaml --require recommended
 
 Pure validate_manifest(dict) has no yaml dependency (tests pass dicts directly).
 """
@@ -144,20 +147,30 @@ def validate_manifest(manifest):
 
 
 def main(argv=None):
-    argv = sys.argv[1:] if argv is None else argv
-    if len(argv) != 1:
-        print("usage: validate_cases.py <manifest.yaml>", file=sys.stderr)
-        return 2
+    import argparse
+    ap = argparse.ArgumentParser(description="Validate a dROAD independent-case manifest")
+    ap.add_argument("manifest", help="path to cases.yaml")
+    ap.add_argument("--require", choices=("minimum", "recommended"), default=None,
+                    help="also fail (exit!=0) if this evidence-base tier is not met")
+    args = ap.parse_args(argv)
     import yaml                                          # only the CLI needs yaml
-    manifest = yaml.safe_load(Path(argv[0]).read_text())
+    manifest = yaml.safe_load(Path(args.manifest).read_text())
     rep = validate_manifest(manifest)
-    print(f"cases={rep['n_cases']} stations={rep.get('n_stations')} regimes={rep.get('regimes')}")
+    print(f"rows={rep.get('n_rows')} cases={rep['n_cases']} stations={rep.get('n_stations')} "
+          f"regimes={rep.get('regimes')}")
+    print(f"regime_counts={rep.get('regime_counts')}")
     for e in rep["errors"]:
         print(f"  ERROR {e}")
     print(f"minimum_evidence_ready: {rep['minimum_evidence_ready']} · "
           f"recommended_promotion_ready: {rep['recommended_promotion_ready']} "
           f"(evidence base only, NOT model promotability) — {'; '.join(rep['readiness_reasons'])}")
-    return 0 if rep["ok"] else 1
+    if not rep["ok"]:
+        return 1
+    if args.require == "minimum" and not rep["minimum_evidence_ready"]:
+        return 1
+    if args.require == "recommended" and not rep["recommended_promotion_ready"]:
+        return 1
+    return 0
 
 
 if __name__ == "__main__":
