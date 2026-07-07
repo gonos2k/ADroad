@@ -93,6 +93,13 @@ def _fmt_delta(x):
     return "NA" if x is None else f"{x:+.4f}"
 
 
+def _fmt_cell(x):
+    """Table/CSV cell: None (empty combo) -> 'NA', floats -> 4dp, else str."""
+    if x is None:
+        return "NA"
+    return f"{x:.4f}" if isinstance(x, float) else str(x)
+
+
 def rank_rows(rows):
     """Prefer robust skill AND clean physics; punish worst-case damage. An average-only
     combo that breaks one window (worst_delta) or raises burden (physics_worse) is demoted.
@@ -167,7 +174,7 @@ def render(store):
     import csv as _csv, io as _io
     buf = _io.StringIO(); w = _csv.writer(buf); w.writerow(_COLS)
     for r in rows:
-        w.writerow([r.get(c, "") for c in _COLS])
+        w.writerow([_fmt_cell(r.get(c)) for c in _COLS])
 
     head = "| " + " | ".join(_COLS) + " |"
     sep = "| " + " | ".join("---" for _ in _COLS) + " |"
@@ -182,9 +189,7 @@ def render(store):
              f"lead{LEADS}. Δrmse=DA−BG(클수록 나쁨). residual은 code-leak 게이트(clean 유지 기대).",
              "", head, sep]
     for r in rows:
-        lines.append("| " + " | ".join(
-            (f"{r.get(c):.4f}" if isinstance(r.get(c), float) else str(r.get(c, "")))
-            for c in _COLS) + " |")
+        lines.append("| " + " | ".join(_fmt_cell(r.get(c)) for c in _COLS) + " |")
 
     if rows:
         best = rows[0]

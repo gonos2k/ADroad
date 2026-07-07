@@ -127,7 +127,8 @@ def test_render_only_empty_combo_does_not_crash(tmp_path, monkeypatch):
     empty = summarize_combo(0.2, 60, 240, []); empty["windows"] = []
     mod.render({empty["key"]: empty})                    # must not raise (None worst_delta)
     md = (tmp_path / "reports" / "forecast_da_fullmodel_grid.md").read_text()
-    assert "worst_delta=NA" in md
+    assert "worst_delta=NA" in md                        # observation line
+    assert "| NA |" in md and "None" not in md           # table cell shows NA, never None
 
 
 def test_load_partial_rejects_value_corrupt_grid_row(tmp_path, monkeypatch):
