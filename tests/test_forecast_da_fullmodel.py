@@ -110,6 +110,27 @@ def test_inject_dx_syncs_tsurfave_and_isolates_state():
     assert surf_bg.TsurfAve == s.TsurfAve
 
 
+def test_build_a0_rejects_bad_dx_scale():
+    from tools.report_forecast_da_fullmodel import build_a0
+    for bad in (0.0, -1.0, float("nan")):                # validated before any model run
+        with pytest.raises(ValueError):
+            build_a0(dx_scale=bad)
+
+
+@pytest.mark.jax
+def test_a0_stress_gate_fails_on_lead_physics_burden():
+    # STRESS: a large (unphysical) dx inflates the lead physics burden. The lead primary
+    # deviation gate must then FAIL even though RMSE may still beat no-DA — the core
+    # "skill can improve yet physics_worse -> flag" contract, end-to-end in the full model.
+    from tools.report_forecast_da_fullmodel import build_a0
+    r = build_a0(k0=3800, window=120, lead=480, dx_scale=15.0)
+    ok, reasons = r["gate_da_vs_bg"]
+    assert r["physics_worse"] is True
+    assert ok is False and any("diagnostic_steps_rate" in x for x in reasons)
+    assert r["da"][1]["diagnostic_steps_rate"] > 0.0      # lead burden actually rose
+    assert r["da"][1]["max_primary_residual"] < 1e-9      # residual still code-clean
+
+
 @pytest.mark.jax
 def test_a0_smoke():
     from tools.report_forecast_da_fullmodel import build_a0

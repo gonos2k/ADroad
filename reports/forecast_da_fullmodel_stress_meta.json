@@ -1,0 +1,41 @@
+{
+  "case_id": "stress",
+  "k0": 3800,
+  "window": 120,
+  "lead": 480,
+  "bg_weight": 0.05,
+  "dx_scale": 15.0,
+  "valid_lead": 480,
+  "bg_forecast_rmse": 1.344087444929247,
+  "da_forecast_rmse": 1.2072669199715982,
+  "const_forecast_rmse": 1.5360751264119479,
+  "rmse_delta_da_minus_bg": -0.13682052495764885,
+  "da_gate_vs_bg": "FAIL",
+  "da_gate_vs_bg_reasons": [
+    "diagnostic_steps_rate worse than baseline"
+  ],
+  "physics_worse": true,
+  "bg_lead_residual": 2.220446049250313e-16,
+  "da_lead_residual": 4.440892098500626e-16,
+  "bg_lead_diagnostic_steps_rate": 0.0,
+  "da_lead_diagnostic_steps_rate": 0.325,
+  "bg_lead_over_melt_count": 0,
+  "da_lead_over_melt_count": 0,
+  "bg_lead_overflow_count": 0,
+  "da_lead_overflow_count": 0,
+  "bg_window_diagnostic_steps_rate": 0.041666666666666664,
+  "da_window_diagnostic_steps_rate": 0.13333333333333333,
+  "bg_window_over_melt_count": 0,
+  "da_window_over_melt_count": 0,
+  "bg_window_overflow_count": 0,
+  "da_window_overflow_count": 0,
+  "state_correction_dx": [
+    1.1669228229901238,
+    5.006164544893154,
+    35.723865353866394,
+    19.388467366529923
+  ],
+  "dx_l2": 40.96987448076369,
+  "dx_max_abs": 35.723865353866394,
+  "state_correction_large": true
+}

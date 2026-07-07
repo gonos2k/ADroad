@@ -1,0 +1,4 @@
+model,rmse,mae,freeze_thaw_accuracy,max_primary_residual,over_melt_count,overflow_count,gate_vs_bg
+constant_initial,1.5360751264119479,1.0802083333333337,0.8229166666666666,,,,baseline
+no_DA(background),1.344087444929247,1.270695845339562,0.8770833333333333,2.220446049250313e-16,0,0,baseline
+"DA(state, full)",1.2072669199715982,1.0052433497237605,0.8229166666666666,4.440892098500626e-16,0,0,FAIL — diagnostic_steps_rate worse than baseline

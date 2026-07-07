@@ -7,3 +7,4 @@ build/
 dist/
 *.egg-info/
 reports/*_partial.json
+reports/forecast_da_fullmodel_scan*

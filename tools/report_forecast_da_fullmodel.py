@@ -109,9 +109,15 @@ def _full_forecast(objs, k0, span, dx=None):
     return full_rollout(**_forecast_kwargs(objs, k0, span, dx))
 
 
-def build_a0(k0=K0, window=WINDOW, lead=LEAD, bg_w=BG_WEIGHT):
+def build_a0(k0=K0, window=WINDOW, lead=LEAD, bg_w=BG_WEIGHT, dx_scale=1.0):
+    """dx_scale>1 = STRESS mode: inflate the fitted dx to an unphysically large state
+    correction. This is a diagnostic stress (not real DA) to probe whether a large
+    thermal perturbation increases the lead physics burden and makes the deviation gate
+    FAIL — i.e. to verify the lead primary gate actually catches DA-induced burden."""
     from tools.report_forecast_da import _setup, _advance, _span, _slice_forc, _validate_cycle_args
     _validate_cycle_args(k0, window, lead, bg_w)
+    if not np.isfinite(dx_scale) or dx_scale <= 0:
+        raise ValueError("dx_scale must be a finite positive number")
     m, objs, jnp, dd, jm, fit = _setup()
     _advance(m, objs, 0, k0)                                   # spin full model to k0
     span = window + lead
@@ -130,7 +136,7 @@ def build_a0(k0=K0, window=WINDOW, lead=LEAD, bg_w=BG_WEIGHT):
         return jnp.sum(w * (p - obs_j) ** 2) / jnp.sum(w) + bg_w * jnp.sum(d ** 2)
 
     dx_opt, _ = fit(loss, jnp.zeros(4), steps=400, lr=0.05)
-    dx = np.asarray(dx_opt, float)
+    dx = np.asarray(dx_opt, float) * dx_scale         # dx_scale>1 = stress (unphysical)
 
     # --- full-model forecasts (obs 미삽입 free-run over window+lead) ---
     out_bg = _full_forecast(objs, k0, span, dx=None)
@@ -159,7 +165,7 @@ def build_a0(k0=K0, window=WINDOW, lead=LEAD, bg_w=BG_WEIGHT):
 
     gate = skill_gate(m_da, m_bg, deviation=dev_da, baseline_deviation=dev_bg)   # skill + 물리부담
     delta = diagnostics_delta(dev_da, dev_bg)
-    return {"k0": k0, "window": window, "lead": lead, "bg_w": bg_w,
+    return {"k0": k0, "window": window, "lead": lead, "bg_w": bg_w, "dx_scale": dx_scale,
             "valid_lead": int(len(lead_idx)), "dx": [float(v) for v in dx],
             "dx_l2": float(np.sqrt(np.sum(dx ** 2))), "dx_max_abs": float(np.max(np.abs(dx))),
             "const": m_const, "bg": (m_bg, dev_bg), "da": (m_da, dev_da),
@@ -196,8 +202,10 @@ def main():
     ap.add_argument("--lead", type=int, default=LEAD)
     ap.add_argument("--bg-w", type=float, default=BG_WEIGHT, dest="bg_w")
     ap.add_argument("--tag", default="", help="artifact filename suffix + case_id (예: storage_active)")
+    ap.add_argument("--dx-scale", type=float, default=1.0, dest="dx_scale",
+                    help=">1이면 stress 모드(dx를 인위적으로 확대해 lead 물리부담 gate 검증)")
     args = ap.parse_args()
-    r = build_a0(args.k0, args.window, args.lead, args.bg_w)
+    r = build_a0(args.k0, args.window, args.lead, args.bg_w, args.dx_scale)
     rows = _rows(r)
     outdir = REPO / "reports"; outdir.mkdir(exist_ok=True)
     suffix = f"_{args.tag}" if args.tag else ""
@@ -252,7 +260,7 @@ def main():
 
     import json as _json
     meta = {"case_id": case_id, "k0": r["k0"], "window": r["window"], "lead": r["lead"], "bg_weight": r["bg_w"],
-            "valid_lead": r["valid_lead"],
+            "dx_scale": r["dx_scale"], "valid_lead": r["valid_lead"],
             "bg_forecast_rmse": r["bg"][0]["rmse"], "da_forecast_rmse": r["da"][0]["rmse"],
             "const_forecast_rmse": r["const"]["rmse"], "rmse_delta_da_minus_bg": dbg,
             "da_gate_vs_bg": "PASS" if r["gate_da_vs_bg"][0] else "FAIL",
