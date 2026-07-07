@@ -36,6 +36,17 @@ from droad.skill_gate import forecast_metrics, skill_gate, diagnostics_delta  # 
 K0, WINDOW, LEAD, BG_WEIGHT = 2000, 120, 480, 0.05
 
 
+def _pos_float(name, x):
+    """Finite positive scalar, matching the project numeric policy (reject bool/string so
+    dx_scale=True can't sneak through as 1.0)."""
+    if isinstance(x, (bool, np.bool_)) or isinstance(x, (str, bytes)):
+        raise ValueError(f"{name} must be numeric, not bool/string")
+    v = float(x)
+    if not np.isfinite(v) or v <= 0:
+        raise ValueError(f"{name} must be a finite positive number")
+    return v
+
+
 def _validate_dx(dx):
     """A state correction is a finite offset for near-surface layers 1:5 (shape (4,)).
     Reject wrong shape, non-finite, and bool/string/object (matching the project-wide
@@ -116,8 +127,7 @@ def build_a0(k0=K0, window=WINDOW, lead=LEAD, bg_w=BG_WEIGHT, dx_scale=1.0):
     FAIL — i.e. to verify the lead primary gate actually catches DA-induced burden."""
     from tools.report_forecast_da import _setup, _advance, _span, _slice_forc, _validate_cycle_args
     _validate_cycle_args(k0, window, lead, bg_w)
-    if not np.isfinite(dx_scale) or dx_scale <= 0:
-        raise ValueError("dx_scale must be a finite positive number")
+    dx_scale = _pos_float("dx_scale", dx_scale)   # rejects bool/str, requires finite>0
     m, objs, jnp, dd, jm, fit = _setup()
     _advance(m, objs, 0, k0)                                   # spin full model to k0
     span = window + lead
@@ -227,14 +237,22 @@ def main():
     sep = "| " + " | ".join("---" for _ in _COLS) + " |"
     dbg = r["rmse_delta_da_minus_bg"]
     dev_bg_win, dev_da_win = r["win"]
-    lines = [f"# Full-model forecast DA — 설계 A0 ({r['lead']} step lead)", "",
-             "dry에서 추정한 near-surface 상태보정 dx를 **full 모델** k0 상태에 주입하고(TsurfAve 동기화), "
-             "[k0, k0+window+lead)를 obs 미삽입 free-run으로 예보한다. dry DA와 달리 storage가 진행되므로 "
-             "**deviation 감사(물리 부담)가 forecast DA에 처음 적용**된다. gate: RMSE hard + 물리 부담 비악화.",
-             "",
-             f"k0={r['k0']} · 동화창 {r['window']} · 예보 lead {r['lead']} valid obs {r['valid_lead']}개. "
-             "raw dx at k0 (A0). analysis-window diagnostics는 report-only, lead-aligned budget이 primary gate.",
-             "", head, sep]
+    stress = r["dx_scale"] != 1.0
+    title = (f"# Full-model forecast DA — A0 STRESS (dx_scale={r['dx_scale']:g})"
+             if stress else f"# Full-model forecast DA — 설계 A0 ({r['lead']} step lead)")
+    lines = [title, ""]
+    if stress:
+        lines += [f"> **주의: 이 artifact는 실제 DA 성능 평가가 아니라 fitted dx를 {r['dx_scale']:g}배 확대한 "
+                  "unphysical STRESS test다.** 목적은 RMSE가 개선되어도 lead physics burden이 악화되면 "
+                  "skill_gate가 FAIL하는지(정직성 계약)를 검증하는 것. 아래 큰 dx_l2/max|dx|는 이 인위적 확대의 결과다.", ""]
+    lines += ["dry에서 추정한 near-surface 상태보정 dx를 **full 모델** k0 상태에 주입하고(TsurfAve 동기화), "
+              "[k0, k0+window+lead)를 obs 미삽입 free-run으로 예보한다. dry DA와 달리 storage가 진행되므로 "
+              "**deviation 감사(물리 부담)가 forecast DA에 처음 적용**된다. gate: RMSE hard + 물리 부담 비악화.",
+              "",
+              f"k0={r['k0']} · 동화창 {r['window']} · 예보 lead {r['lead']} valid obs {r['valid_lead']}개 · "
+              f"dx_scale={r['dx_scale']:g}. raw dx at k0 (A0). analysis-window diagnostics는 report-only, "
+              "lead-aligned budget이 primary gate.",
+              "", head, sep]
     for row in rows:
         lines.append("| " + " | ".join(
             (f"{row[c]:.4f}" if isinstance(row[c], float) else str(row[c])) for c in _COLS) + " |")
@@ -258,10 +276,16 @@ def main():
               f"rate={dev_bg_win['diagnostic_steps_rate']:.4f}",
               f"- DA:         over_melt={dev_da_win['over_melt_count']} overflow={dev_da_win['overflow_count']} "
               f"rate={dev_da_win['diagnostic_steps_rate']:.4f}",
-              "", "**주의**: diagnostic 활동이 window(report-only)에서만 발생하고 lead(primary gate)에서 0이면, "
-              "이 case는 'storage-active signal은 있으나 lead deviation gate는 clean'이다 — lead gate가 실제 "
-              "burden 증가를 처리했다는 증거는 아니다(그건 lead 구간에 diagnostics가 발생하는 window/stress 필요).",
-              "", "해석: DA가 lead 예보 RMSE를 낮추면서(gate PASS) physics_worse=False면 열 보정이 full 예보에서 "
+              ""]
+    if dev_da_lead["diagnostic_steps_rate"] > dev_bg_lead["diagnostic_steps_rate"]:
+        lines += ["**stress 해석**: lead(primary gate)에서 DA diagnostic burden이 background보다 증가했다 "
+                  f"(da {dev_da_lead['diagnostic_steps_rate']:.4f} > bg {dev_bg_lead['diagnostic_steps_rate']:.4f}). "
+                  "따라서 RMSE가 개선되어도 skill_gate가 FAIL한다 — 이것이 의도한 end-to-end gate 검증(정직성 계약)이다."]
+    else:
+        lines += ["**주의**: diagnostic 활동이 window(report-only)에서만 발생하고 lead(primary gate)에서 0이면, "
+                  "이 case는 'storage-active signal은 있으나 lead deviation gate는 clean'이다 — lead gate가 실제 "
+                  "burden 증가를 처리했다는 증거는 아니다(그건 lead 구간에 diagnostics가 발생하는 window/stress 필요)."]
+    lines += ["", "해석: DA가 lead 예보 RMSE를 낮추면서(gate PASS) physics_worse=False면 열 보정이 full 예보에서 "
               "살아남고 물리 부담도 clean. physics_worse=True면 열을 맞추려다 융해/상전이를 왜곡한 것 → 설계 C 신호."]
     (outdir / f"forecast_da_fullmodel{suffix}.md").write_text("\n".join(lines) + "\n", encoding="utf-8")
     (outdir / f"forecast_da_fullmodel{suffix}.csv").write_text(buf.getvalue(), encoding="utf-8")

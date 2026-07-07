@@ -1,8 +1,10 @@
-# Full-model forecast DA — 설계 A0 (480 step lead)
+# Full-model forecast DA — A0 STRESS (dx_scale=15)
+
+> **주의: 이 artifact는 실제 DA 성능 평가가 아니라 fitted dx를 15배 확대한 unphysical STRESS test다.** 목적은 RMSE가 개선되어도 lead physics burden이 악화되면 skill_gate가 FAIL하는지(정직성 계약)를 검증하는 것. 아래 큰 dx_l2/max|dx|는 이 인위적 확대의 결과다.
 
 dry에서 추정한 near-surface 상태보정 dx를 **full 모델** k0 상태에 주입하고(TsurfAve 동기화), [k0, k0+window+lead)를 obs 미삽입 free-run으로 예보한다. dry DA와 달리 storage가 진행되므로 **deviation 감사(물리 부담)가 forecast DA에 처음 적용**된다. gate: RMSE hard + 물리 부담 비악화.
 
-k0=3800 · 동화창 120 · 예보 lead 480 valid obs 480개. raw dx at k0 (A0). analysis-window diagnostics는 report-only, lead-aligned budget이 primary gate.
+k0=3800 · 동화창 120 · 예보 lead 480 valid obs 480개 · dx_scale=15. raw dx at k0 (A0). analysis-window diagnostics는 report-only, lead-aligned budget이 primary gate.
 
 | model | rmse | mae | freeze_thaw_accuracy | max_primary_residual | over_melt_count | overflow_count | gate_vs_bg |
 | --- | --- | --- | --- | --- | --- | --- | --- |
@@ -22,6 +24,6 @@ k0=3800 · 동화창 120 · 예보 lead 480 valid obs 480개. raw dx at k0 (A0).
 - background: over_melt=0 overflow=0 rate=0.0417
 - DA:         over_melt=0 overflow=0 rate=0.1333
 
-**주의**: diagnostic 활동이 window(report-only)에서만 발생하고 lead(primary gate)에서 0이면, 이 case는 'storage-active signal은 있으나 lead deviation gate는 clean'이다 — lead gate가 실제 burden 증가를 처리했다는 증거는 아니다(그건 lead 구간에 diagnostics가 발생하는 window/stress 필요).
+**stress 해석**: lead(primary gate)에서 DA diagnostic burden이 background보다 증가했다 (da 0.3250 > bg 0.0000). 따라서 RMSE가 개선되어도 skill_gate가 FAIL한다 — 이것이 의도한 end-to-end gate 검증(정직성 계약)이다.
 
 해석: DA가 lead 예보 RMSE를 낮추면서(gate PASS) physics_worse=False면 열 보정이 full 예보에서 살아남고 물리 부담도 clean. physics_worse=True면 열을 맞추려다 융해/상전이를 왜곡한 것 → 설계 C 신호.

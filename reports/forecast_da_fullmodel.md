@@ -2,7 +2,7 @@
 
 dry에서 추정한 near-surface 상태보정 dx를 **full 모델** k0 상태에 주입하고(TsurfAve 동기화), [k0, k0+window+lead)를 obs 미삽입 free-run으로 예보한다. dry DA와 달리 storage가 진행되므로 **deviation 감사(물리 부담)가 forecast DA에 처음 적용**된다. gate: RMSE hard + 물리 부담 비악화.
 
-k0=2000 · 동화창 120 · 예보 lead 480 valid obs 480개. raw dx at k0 (A0). analysis-window diagnostics는 report-only, lead-aligned budget이 primary gate.
+k0=2000 · 동화창 120 · 예보 lead 480 valid obs 480개 · dx_scale=1. raw dx at k0 (A0). analysis-window diagnostics는 report-only, lead-aligned budget이 primary gate.
 
 | model | rmse | mae | freeze_thaw_accuracy | max_primary_residual | over_melt_count | overflow_count | gate_vs_bg |
 | --- | --- | --- | --- | --- | --- | --- | --- |

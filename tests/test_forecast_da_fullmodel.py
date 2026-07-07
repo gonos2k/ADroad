@@ -121,7 +121,8 @@ def test_safe_tag_sanitizes_filename_unsafe_chars():
 
 def test_build_a0_rejects_bad_dx_scale():
     from tools.report_forecast_da_fullmodel import build_a0
-    for bad in (0.0, -1.0, float("nan")):                # validated before any model run
+    # validated before any model run: non-positive, non-finite, and bool/string (numeric policy)
+    for bad in (0.0, -1.0, float("nan"), True, "15"):
         with pytest.raises(ValueError):
             build_a0(dx_scale=bad)
 
@@ -134,6 +135,9 @@ def test_a0_stress_gate_fails_on_lead_physics_burden():
     from tools.report_forecast_da_fullmodel import build_a0
     r = build_a0(k0=3800, window=120, lead=480, dx_scale=15.0)
     ok, reasons = r["gate_da_vs_bg"]
+    # the core contract: RMSE IMPROVES yet the gate FAILs on physics burden
+    assert r["rmse_delta_da_minus_bg"] < 0.0              # DA beats no-DA on skill
+    assert r["da"][0]["rmse"] < r["bg"][0]["rmse"]        # ...same, stated directly
     assert r["physics_worse"] is True
     assert ok is False and any("diagnostic_steps_rate" in x for x in reasons)
     assert r["da"][1]["diagnostic_steps_rate"] > 0.0      # lead burden actually rose
