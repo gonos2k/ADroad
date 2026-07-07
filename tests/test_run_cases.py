@@ -101,6 +101,17 @@ def test_run_manifest_refuses_invalid_or_thin_manifest():
         run_manifest(thin, make_setting(0.05, 60, 480), run_one=lambda c, s: _row())
 
 
+def test_run_manifest_rejects_mismatched_case_id_or_regime():
+    cases = [_mcase("a", "sa", 1), _mcase("b", "sb", 2, "warm_wet"),
+             _mcase("c", "sc", 3, "precip_snow")]
+    with pytest.raises(ValueError):                              # loader returns wrong case_id
+        run_manifest({"cases": cases}, make_setting(0.05, 60, 480),
+                     run_one=lambda c, s: _row(cid="WRONG", regime=c["regime"]))
+    with pytest.raises(ValueError):                              # loader returns wrong regime
+        run_manifest({"cases": cases}, make_setting(0.05, 60, 480),
+                     run_one=lambda c, s: _row(cid=c["case_id"], regime="melt_refreeze"))
+
+
 def test_run_manifest_rejects_bad_require_value():
     cases = [_mcase("a", "sa", 1), _mcase("b", "sb", 2, "warm_wet"),
              _mcase("c", "sc", 3, "precip_snow")]

@@ -117,7 +117,17 @@ def run_manifest(manifest, setting, run_one=_run_one_not_implemented, require="m
         raise ValueError(f"manifest not minimum_evidence_ready: {rep['minimum_reasons']}")
     if require == "recommended" and not rep["recommended_promotion_ready"]:
         raise ValueError(f"manifest not recommended_promotion_ready: {rep['recommended_reasons']}")
-    rows = [run_one(c, setting) for c in manifest["cases"]]
+    rows = []
+    for c in manifest["cases"]:
+        row = run_one(c, setting)
+        # loader safety belt: a row must describe the case it was asked to run.
+        if not isinstance(row, dict) or row.get("case_id") != c["case_id"]:
+            raise ValueError(f"run_one returned a row for {row.get('case_id') if isinstance(row, dict) else '?'!r}, "
+                             f"expected {c['case_id']!r}")
+        if row.get("regime") != c["regime"]:
+            raise ValueError(f"run_one row {c['case_id']!r} regime {row.get('regime')!r} "
+                             f"!= manifest {c['regime']!r}")
+        rows.append(row)
     return summarize_cases(rows), rows
 
 
