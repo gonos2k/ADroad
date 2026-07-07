@@ -4,17 +4,17 @@
 
 windows: k0=1500+i×600 (i<4) · 동화창 120 · lead 480 · bg_w 0.05. promotion: 단일 fixture라 n_cases=1 고정 → REPORT_ONLY(정직성). 다수 독립 case는 Step 4(cases.yaml).
 
-| k0 | bg_rmse | da_rmse | rmse_delta | skill_improved | gate_pass | physics_worse | state_large | lead_diag_da | win_diag_da | resid_da |
-| --- | --- | --- | --- | --- | --- | --- | --- | --- | --- | --- |
-| 1500 | 0.5248 | 0.6431 | 0.1183 | False | False | False | False | 0.0000 | 0.0000 | 0.0000 |
-| 2100 | 0.2113 | 0.2313 | 0.0200 | False | False | False | False | 0.0000 | 0.0000 | 0.0000 |
-| 2700 | 0.4639 | 0.4593 | -0.0046 | True | True | False | False | 0.0000 | 0.0333 | 0.0000 |
-| 3300 | 1.2196 | 1.1822 | -0.0374 | True | True | False | False | 0.0333 | 0.0000 | 0.0000 |
+| k0 | bg_rmse | da_rmse | rmse_delta | skill_improved | gate_pass | physics_worse | state_large | lead_diag_bg | lead_diag_da | win_diag_bg | win_diag_da | resid_bg | resid_da |
+| --- | --- | --- | --- | --- | --- | --- | --- | --- | --- | --- | --- | --- | --- |
+| 1500 | 0.5248 | 0.6431 | 0.1183 | False | False | False | False | 0.0000 | 0.0000 | 0.0000 | 0.0000 | 0.0000 | 0.0000 |
+| 2100 | 0.2113 | 0.2313 | 0.0200 | False | False | False | False | 0.0000 | 0.0000 | 0.0000 | 0.0000 | 0.0000 | 0.0000 |
+| 2700 | 0.4639 | 0.4593 | -0.0046 | True | True | False | False | 0.0000 | 0.0000 | 0.0667 | 0.0333 | 0.0000 | 0.0000 |
+| 3300 | 1.2196 | 1.1822 | -0.0374 | True | True | False | False | 0.0333 | 0.0333 | 0.0000 | 0.0000 | 0.0000 | 0.0000 |
 
 ## 집계 (single fixture → REPORT_ONLY)
 - gate PASS: 2/4 (rate 0.50) · beats-all=False
 - skill 개선: 2/4 (rate 0.50) · physics_worse: 0/4 (rate 0.00)
-- state_correction_large: 0/4 · mean Δrmse +0.0240 · worst Δrmse +0.1183
+- state_correction_large: 0/4 · mean Δrmse +0.0240 · worst Δrmse +0.1183 (Δrmse=DA−BG, 클수록 나쁨 → worst=max)
 - max lead diag_rate(DA): 0.0333 · max residual 1.73e-18 (clean=True)
 - **promotion: REPORT_ONLY** — insufficient cases: 1 < 3 (report-only); does not beat baseline in every window
 

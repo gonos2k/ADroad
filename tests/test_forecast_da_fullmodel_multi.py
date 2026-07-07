@@ -75,10 +75,32 @@ def test_summarize_reports_physics_worse_rate_and_non_beat():
     assert any("does not beat baseline in every window" in x for x in s["promotion"][1])
 
 
-def test_summarize_flags_dirty_residual():
+def test_summarize_dirty_residual_blocks_promotion():
+    # even if skill passes everywhere, a dirty aggregate residual must block promotion
+    # AND surface a reason (the code-leak detector fired) — not just report residual_clean.
     rows = [_case_row(_result(1500, 0.20, 0.22, gate_ok=True, physics_worse=False, resid=1e-6))]
     s = summarize_multi(rows)
     assert s["residual_clean"] is False and s["max_residual"] == pytest.approx(1e-6)
+    verdict, reasons = s["promotion"]
+    assert verdict == "REPORT_ONLY" and any("aggregate residual" in x for x in reasons)
+
+
+def test_load_partial_ignores_stale_or_bad(tmp_path, monkeypatch):
+    import tools.report_forecast_da_fullmodel_multi as mod
+    import json
+    p = tmp_path / "partial.json"
+    monkeypatch.setattr(mod, "PARTIAL", p)
+    # a bare-list (old schema) partial -> ignored, not crash
+    p.write_text(json.dumps([{"k0": 1500}]))
+    assert mod._load_partial() == {}
+    # wrong config -> ignored
+    p.write_text(json.dumps({"schema_version": mod._SCHEMA,
+                             "config": {"stride": 999}, "rows": [{"k0": 1500}]}))
+    assert mod._load_partial() == {}
+    # matching schema + config -> loaded
+    p.write_text(json.dumps({"schema_version": mod._SCHEMA, "config": mod._CONFIG,
+                             "rows": [{"k0": 1500, "gate_pass": True}]}))
+    assert set(mod._load_partial().keys()) == {1500}
 
 
 @pytest.mark.jax

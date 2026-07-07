@@ -72,8 +72,14 @@ def summarize_multi(rows, residual_atol=1e-9):
     all_beat = wins == n
     deltas = [x["rmse_delta"] for x in rows]
     max_resid = max(max(x["resid_bg"], x["resid_da"]) for x in rows)
-    verdict = promotion_gate(n_cases=1, windows_beat_baseline=all_beat,
-                             residual_atol=residual_atol)
+    residual_clean = bool(max_resid <= residual_atol)
+    verdict, reasons = promotion_gate(n_cases=1, windows_beat_baseline=all_beat,
+                                      residual_atol=residual_atol)
+    # aggregate audit must also block promotion: a dirty residual in ANY window means
+    # the code-leak detector fired, so never PROMOTE regardless of skill (design §11).
+    if not residual_clean:
+        reasons = list(reasons) + [f"aggregate residual {max_resid:.3e} > {residual_atol:.0e}"]
+        verdict = "REPORT_ONLY"
     return {"n_valid": n, "gate_pass_n": wins, "gate_pass_rate": wins / n, "all_beat": all_beat,
             "skill_improved_n": sum(x["skill_improved"] for x in rows),
             "skill_improved_rate": sum(x["skill_improved"] for x in rows) / n,
@@ -82,18 +88,43 @@ def summarize_multi(rows, residual_atol=1e-9):
             "state_large_n": sum(x["state_large"] for x in rows),
             "mean_delta": _mean(deltas), "worst_delta": max(deltas),
             "max_lead_diag_da": max(x["lead_diag_da"] for x in rows),
-            "max_residual": max_resid, "residual_clean": bool(max_resid <= residual_atol),
-            "promotion": verdict}
+            "max_residual": max_resid, "residual_clean": residual_clean,
+            "promotion": (verdict, reasons)}
 
 
+# baseline (bg) diagnostic/residual columns are shown next to DA so a physics_worse=False
+# row with non-zero lead_diag_da is legible: the gate compares DA burden vs baseline, not
+# vs zero, so the reader needs both columns to see WHY it's not worse.
 _COLS = ("k0", "bg_rmse", "da_rmse", "rmse_delta", "skill_improved", "gate_pass",
-         "physics_worse", "state_large", "lead_diag_da", "win_diag_da", "resid_da")
+         "physics_worse", "state_large", "lead_diag_bg", "lead_diag_da",
+         "win_diag_bg", "win_diag_da", "resid_bg", "resid_da")
+
+
+_SCHEMA = 1
+_CONFIG = {"k0_first": K0_FIRST, "stride": STRIDE, "window": WINDOW, "lead": LEAD,
+           "bg_weight": BG_WEIGHT}
 
 
 def _load_partial():
-    if PARTIAL.exists():
-        return {int(r["k0"]): r for r in json.loads(PARTIAL.read_text())}
-    return {}
+    """Load accumulated windows, but IGNORE a stale partial (old schema or different
+    config) — a runner resuming across config changes must not mix incompatible rows."""
+    if not PARTIAL.exists():
+        return {}
+    try:
+        blob = json.loads(PARTIAL.read_text())
+        if blob.get("schema_version") != _SCHEMA or blob.get("config") != _CONFIG:
+            print(f"  [warn] stale partial ({PARTIAL.name}) — schema/config mismatch, ignoring")
+            return {}
+        return {int(r["k0"]): r for r in blob["rows"]}
+    except (ValueError, KeyError, TypeError, AttributeError):
+        print(f"  [warn] unreadable partial ({PARTIAL.name}) — ignoring")
+        return {}
+
+
+def _save_partial(store):
+    PARTIAL.write_text(json.dumps(
+        {"schema_version": _SCHEMA, "config": _CONFIG, "rows": [store[k] for k in sorted(store)]},
+        indent=2, allow_nan=False), encoding="utf-8")
 
 
 def render(store):
@@ -129,7 +160,8 @@ def render(store):
                   f"- skill 개선: {s['skill_improved_n']}/{s['n_valid']} (rate {s['skill_improved_rate']:.2f}) · "
                   f"physics_worse: {s['physics_worse_n']}/{s['n_valid']} (rate {s['physics_worse_rate']:.2f})",
                   f"- state_correction_large: {s['state_large_n']}/{s['n_valid']} · "
-                  f"mean Δrmse {s['mean_delta']:+.4f} · worst Δrmse {s['worst_delta']:+.4f}",
+                  f"mean Δrmse {s['mean_delta']:+.4f} · worst Δrmse {s['worst_delta']:+.4f} "
+                  "(Δrmse=DA−BG, 클수록 나쁨 → worst=max)",
                   f"- max lead diag_rate(DA): {s['max_lead_diag_da']:.4f} · "
                   f"max residual {s['max_residual']:.2e} (clean={s['residual_clean']})",
                   f"- **promotion: {verdict}** — {'; '.join(reasons)}",
@@ -157,6 +189,8 @@ def main():
     args = ap.parse_args()
     if args.start < 0 or args.count < 0:
         ap.error("--start and --count must be non-negative")
+    if not args.render and args.start >= N_WINDOWS:
+        ap.error(f"--start must be < N_WINDOWS ({N_WINDOWS}); use --render to only re-render")
 
     store = _load_partial()
     if not args.render:
@@ -169,8 +203,7 @@ def main():
                 continue
             row = _case_row(r)
             store[k0] = row
-            PARTIAL.write_text(json.dumps([store[k] for k in sorted(store)], indent=2,
-                                          allow_nan=False), encoding="utf-8")
+            _save_partial(store)
             print(f"  window {i} k0={k0}: Δrmse={row['rmse_delta']:+.4f} gate_pass={row['gate_pass']} "
                   f"physics_worse={row['physics_worse']} lead_diag_da={row['lead_diag_da']:.4f}")
     rows, s = render(store)
