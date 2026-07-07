@@ -57,7 +57,22 @@ def test_two_tier_readiness():
     rep = validate_manifest({"cases": cases})
     assert rep["ok"] and rep["minimum_evidence_ready"] is True
     assert rep["recommended_promotion_ready"] is False             # 1 case/regime < 3
-    assert any("per regime" in r for r in rep["readiness_reasons"])
+    assert rep["minimum_reasons"] == ["meets minimum target"]      # minimum is clean
+    assert any("per regime" in r for r in rep["recommended_reasons"])
+
+
+def test_minimum_ready_does_not_leak_recommended_failures_into_minimum_reasons():
+    # minimum-ready but recommended-not: minimum_reasons must stay clean, recommended flags it.
+    cases = [_case(cid="a1", station="a", start="2026-01-01T00:00:00", end="2026-01-01T06:00:00"),
+             _case(cid="b1", station="b", start="2026-01-02T00:00:00", end="2026-01-02T06:00:00",
+                   regime="warm_wet"),
+             _case(cid="c1", station="c", start="2026-01-03T00:00:00", end="2026-01-03T06:00:00",
+                   regime="precip_snow")]
+    rep = validate_manifest({"cases": cases})
+    assert rep["minimum_evidence_ready"] is True
+    assert rep["minimum_reasons"] == ["meets minimum target"]
+    assert rep["recommended_promotion_ready"] is False
+    assert rep["recommended_reasons"] != ["meets recommended target"]
 
 
 def _cases_per_regime(counts):
@@ -81,7 +96,7 @@ def test_recommended_requires_three_cases_per_regime():
         {"dry_cold": 7, "warm_wet": 1, "freeze_transition": 1})})
     assert lop["ok"] and lop["minimum_evidence_ready"] is True
     assert lop["recommended_promotion_ready"] is False
-    assert any("per regime" in r for r in lop["readiness_reasons"])
+    assert any("per regime" in r for r in lop["recommended_reasons"])
 
 
 def test_minimum_not_met_when_too_few_or_single_regime():
@@ -89,10 +104,10 @@ def test_minimum_not_met_when_too_few_or_single_regime():
                            end=f"2026-01-0{i}T12:00:00") for i in (1, 2, 3)]
     rep = validate_manifest({"cases": single_regime})
     assert rep["ok"] is True and rep["minimum_evidence_ready"] is False   # one regime
-    assert any("regimes" in r for r in rep["readiness_reasons"])
+    assert any("regimes" in r for r in rep["minimum_reasons"])
     rep2 = validate_manifest({"cases": single_regime[:1]})
     assert rep2["minimum_evidence_ready"] is False
-    assert any("cases 1 < minimum" in r for r in rep2["readiness_reasons"])
+    assert any("cases 1 < minimum" in r for r in rep2["minimum_reasons"])
 
 
 def test_duplicate_id_is_error():

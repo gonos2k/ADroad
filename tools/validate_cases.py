@@ -104,7 +104,8 @@ def validate_manifest(manifest):
     if not isinstance(manifest, dict) or not isinstance(manifest.get("cases"), list):
         return {"ok": False, "errors": ["manifest must be a mapping with a 'cases' list"],
                 "n_cases": 0, "minimum_evidence_ready": False,
-                "recommended_promotion_ready": False, "readiness_reasons": ["no cases"]}
+                "recommended_promotion_ready": False,
+                "minimum_reasons": ["no cases"], "recommended_reasons": ["no cases"]}
     errors, ids, stations = [], set(), set()
     regime_counts = Counter()
     by_station = defaultdict(list)
@@ -122,15 +123,14 @@ def validate_manifest(manifest):
     errors += _overlap_errors(by_station)
 
     n_cases, n_reg = len(ids), len(regime_counts)
-    reasons = []
-    if errors:
-        reasons.append("has errors")
+    # minimum and recommended reasons are tracked SEPARATELY so a minimum-ready manifest
+    # doesn't confusingly surface recommended-only failures as if it failed.
+    min_reasons = ["has errors"] if errors else []
     if n_cases < MIN_CASES:
-        reasons.append(f"cases {n_cases} < minimum {MIN_CASES}")
+        min_reasons.append(f"cases {n_cases} < minimum {MIN_CASES}")
     if n_reg < MIN_REGIMES:
-        reasons.append(f"regimes {n_reg} < minimum {MIN_REGIMES}")
-    min_ready = not reasons
-    rec_reasons = list(reasons)
+        min_reasons.append(f"regimes {n_reg} < minimum {MIN_REGIMES}")
+    rec_reasons = list(min_reasons)            # recommended presupposes minimum
     if n_reg < RECOMMENDED_REGIMES:
         rec_reasons.append(f"regimes {n_reg} < recommended {RECOMMENDED_REGIMES}")
     thin = {r: n for r, n in regime_counts.items() if n < RECOMMENDED_CASES_PER_REGIME}
@@ -141,9 +141,10 @@ def validate_manifest(manifest):
             "n_rows": len(manifest["cases"]), "n_cases": n_cases,
             "n_stations": len(stations), "n_regimes": n_reg,
             "regimes": sorted(regime_counts), "regime_counts": dict(sorted(regime_counts.items())),
-            "minimum_evidence_ready": min_ready,
+            "minimum_evidence_ready": not min_reasons,
             "recommended_promotion_ready": not rec_reasons,
-            "readiness_reasons": rec_reasons if rec_reasons else ["meets recommended target"]}
+            "minimum_reasons": min_reasons or ["meets minimum target"],
+            "recommended_reasons": rec_reasons or ["meets recommended target"]}
 
 
 def main(argv=None):
@@ -161,9 +162,11 @@ def main(argv=None):
     print(f"regime_counts={rep.get('regime_counts')}")
     for e in rep["errors"]:
         print(f"  ERROR {e}")
-    print(f"minimum_evidence_ready: {rep['minimum_evidence_ready']} · "
-          f"recommended_promotion_ready: {rep['recommended_promotion_ready']} "
-          f"(evidence base only, NOT model promotability) — {'; '.join(rep['readiness_reasons'])}")
+    print("(readiness = evidence base only, NOT model promotability)")
+    print(f"minimum_evidence_ready: {rep['minimum_evidence_ready']} — "
+          f"{'; '.join(rep['minimum_reasons'])}")
+    print(f"recommended_promotion_ready: {rep['recommended_promotion_ready']} — "
+          f"{'; '.join(rep['recommended_reasons'])}")
     if not rep["ok"]:
         return 1
     if args.require == "minimum" and not rep["minimum_evidence_ready"]:
