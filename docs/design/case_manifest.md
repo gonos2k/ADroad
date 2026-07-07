@@ -34,23 +34,29 @@ See `cases.example.yaml` for the schema in use (example values, not real observa
 
 `tools/validate_cases.py` makes the schema an **executable gate**, matching the project rule
 that a contract is code, not a doc note (like `promotion_gate` itself). `validate_manifest`
-checks each case's schema/semantics and reports whether the manifest is *promotion-ready as an
-evidence base*:
+checks each case's schema/semantics and reports two readiness tiers, both describing the
+**evidence base** — never model promotability:
 
-- no schema/semantic errors,
-- `n_cases ≥ 3` (matches `promotion_gate(min_cases=3)`),
-- `≥ 2` distinct regimes,
-- no duplicate station-day cases (two "cases" on the same station and date are not
-  independent).
+- `minimum_evidence_ready`: no errors, `n_cases ≥ 3` (matches `promotion_gate(min_cases=3)`),
+  `≥ 2` regimes, and no overlapping cases at the same station. Enough to *run* a first
+  promotion attempt.
+- `recommended_promotion_ready`: no errors, `n_cases ≥ 9`, `≥ 3` regimes, no overlaps. The
+  defensible target below.
 
-`promotion_ready = True` means only that the evidence base is big and diverse enough to *run*
-promotion — never that a model passed. Skill/physics still have to beat baseline in every case
-at run time.
+Independence is checked by **interval overlap per station**, not by start-date: two cases on
+the same station whose `[start, end)` intervals overlap are not independent, even if their
+start dates differ. Datetimes must include a time (no date-only) and start/end must share
+timezone-awareness so comparisons are well-defined.
 
-## Minimum target
+Both flags mean only that the evidence base is large/diverse enough to *attempt* promotion —
+never that a model passed. Skill/physics still have to beat baseline in every case at run time.
+
+## Recommended target
 
 A defensible first promotion attempt: **≥ 3 regimes × ≥ 3 station-days = ≥ 9 independent
-cases**. Fewer is fine for iteration but stays `REPORT_ONLY`.
+cases** (`recommended_promotion_ready`). Fewer still allows a run once
+`minimum_evidence_ready` holds, but the result stays weak and every case is `REPORT_ONLY`
+until it beats baseline.
 
 ## What NOT to do
 

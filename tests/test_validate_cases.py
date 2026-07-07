@@ -33,51 +33,71 @@ def test_case_rejects_missing_fields_and_bad_regime():
         validate_case(_case(start="not-a-date"))                   # bad ISO
 
 
-def test_manifest_promotion_ready_needs_cases_regimes_independence():
-    # 3 distinct station-days across 2 regimes -> ready as an evidence base
+def test_case_requires_time_and_typed_optionals():
+    with pytest.raises(ValueError):
+        validate_case(_case(start="2026-01-01"))                   # date-only, no time
+    with pytest.raises(ValueError):
+        validate_case(_case(forcing_source=123))                   # non-string optional
+    with pytest.raises(ValueError):
+        validate_case(_case(obs_source="  "))                      # empty non-empty-optional
+    start, end = validate_case(_case(notes=""))                    # notes may be empty
+    assert start < end
+
+
+def test_two_tier_readiness():
+    # 3 distinct non-overlapping cases across 3 regimes -> minimum yes, recommended no (<9)
     cases = [
-        _case(cid="a_2026-01-01_dry_cold", station="a", start="2026-01-01T00:00:00",
+        _case(cid="a1", station="a", start="2026-01-01T00:00:00",
               end="2026-01-02T00:00:00", regime="dry_cold"),
-        _case(cid="b_2026-01-05_precip_snow", station="b", start="2026-01-05T00:00:00",
+        _case(cid="b1", station="b", start="2026-01-05T00:00:00",
               end="2026-01-06T00:00:00", regime="precip_snow"),
-        _case(cid="c_2026-01-09_freeze_transition", station="c", start="2026-01-09T00:00:00",
+        _case(cid="c1", station="c", start="2026-01-09T00:00:00",
               end="2026-01-10T00:00:00", regime="freeze_transition"),
     ]
     rep = validate_manifest({"cases": cases})
-    assert rep["ok"] and rep["promotion_ready"] is True
-    assert rep["n_cases"] == 3 and rep["n_regimes"] == 3 and rep["n_distinct_station_days"] == 3
+    assert rep["ok"] and rep["minimum_evidence_ready"] is True
+    assert rep["recommended_promotion_ready"] is False             # only 3 < 9 cases
+    assert any("recommended" in r for r in rep["readiness_reasons"])
 
 
-def test_manifest_not_ready_when_too_few_or_single_regime():
-    single_regime = [_case(cid=f"s_2026-01-0{i}_dry_cold", start=f"2026-01-0{i}T00:00:00",
-                           end=f"2026-01-0{i+1}T00:00:00") for i in (1, 2, 3)]
+def test_minimum_not_met_when_too_few_or_single_regime():
+    single_regime = [_case(cid=f"s{i}", start=f"2026-01-0{i}T00:00:00",
+                           end=f"2026-01-0{i}T12:00:00") for i in (1, 2, 3)]
     rep = validate_manifest({"cases": single_regime})
-    assert rep["ok"] is True                                       # schema fine
-    assert rep["promotion_ready"] is False                        # ...but only one regime
-    assert any("regime coverage" in r for r in rep["promotion_reasons"])
-
+    assert rep["ok"] is True and rep["minimum_evidence_ready"] is False   # one regime
+    assert any("regimes" in r for r in rep["readiness_reasons"])
     rep2 = validate_manifest({"cases": single_regime[:1]})
-    assert rep2["promotion_ready"] is False
-    assert any("insufficient cases" in r for r in rep2["promotion_reasons"])
+    assert rep2["minimum_evidence_ready"] is False
+    assert any("cases 1 < minimum" in r for r in rep2["readiness_reasons"])
 
 
-def test_manifest_flags_duplicate_id_and_station_day():
-    dup_id = [_case(), _case()]                                    # same case_id twice
-    rep = validate_manifest({"cases": dup_id})
+def test_duplicate_id_is_error():
+    rep = validate_manifest({"cases": [_case(), _case()]})         # same case_id twice
     assert rep["ok"] is False and any("duplicate case_id" in e for e in rep["errors"])
 
-    # distinct ids but same station+date -> not independent -> not promotion_ready
-    same_day = [_case(cid="x1"), _case(cid="x2"),
-                _case(cid="y", station="t", start="2026-02-01T00:00:00",
-                      end="2026-02-02T00:00:00", regime="warm_wet")]
-    rep2 = validate_manifest({"cases": same_day})
-    assert rep2["ok"] is True and rep2["promotion_ready"] is False
-    assert any("station-day" in r for r in rep2["promotion_reasons"])
+
+def test_same_station_overlap_is_not_independent():
+    # distinct start dates but overlapping intervals at the same station -> error (not indep)
+    overlap = [
+        _case(cid="A1", station="A", start="2026-01-01T12:00:00", end="2026-01-02T12:00:00"),
+        _case(cid="A2", station="A", start="2026-01-02T00:00:00", end="2026-01-03T00:00:00",
+              regime="warm_wet"),
+    ]
+    rep = validate_manifest({"cases": overlap})
+    assert rep["ok"] is False and any("overlapping cases" in e for e in rep["errors"])
+    assert rep["minimum_evidence_ready"] is False
+
+
+def test_mixed_timezone_does_not_raise():
+    # tz-aware start vs naive end must be reported as an error, not blow up ("never raises")
+    rep = validate_manifest({"cases": [
+        _case(start="2026-01-01T00:00:00+00:00", end="2026-01-02T00:00:00")]})
+    assert rep["ok"] is False and rep["minimum_evidence_ready"] is False
 
 
 def test_manifest_rejects_non_mapping():
     rep = validate_manifest([])
-    assert rep["ok"] is False and rep["promotion_ready"] is False
+    assert rep["ok"] is False and rep["minimum_evidence_ready"] is False
 
 
 def test_example_yaml_is_schema_valid():
