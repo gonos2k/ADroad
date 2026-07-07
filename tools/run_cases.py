@@ -42,7 +42,9 @@ def make_setting(bg_w, window, lead):
     """A frozen A0 hyperparameter setting (chosen from the grid stability region)."""
     bg_w = _finite("bg_w", bg_w)
     for name, v in (("window", window), ("lead", lead)):
-        if isinstance(v, bool) or not isinstance(v, (int, float)) or int(v) != v:
+        if isinstance(v, bool) or not isinstance(v, (int, float)) or not math.isfinite(v):
+            raise ValueError(f"setting {name} must be a finite integer number of steps")
+        if int(v) != v:                        # finite check first so inf/nan don't OverflowError
             raise ValueError(f"setting {name} must be an integer number of steps")
     if not (bg_w > 0 and window > 0 and lead > 0):
         raise ValueError("setting bg_w/window/lead must be positive")
@@ -54,6 +56,9 @@ def _validate_case_row(r):
     returning an inconsistent row must be rejected, not silently promoted."""
     if not isinstance(r, dict) or set(CASE_FIELDS) - set(r):
         raise ValueError(f"case result must have fields {CASE_FIELDS}")
+    for k in ("case_id", "regime"):
+        if not isinstance(r[k], str) or not r[k].strip():
+            raise ValueError(f"case result {k!r} must be a non-empty string")
     for k in _BOOL_FIELDS:
         if not isinstance(r[k], bool):
             raise ValueError(f"case result {k!r} must be bool")

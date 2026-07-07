@@ -26,7 +26,8 @@ def _mcase(cid, station, day, regime="dry_cold"):
 def test_make_setting_validates():
     assert make_setting(0.05, 60, 480) == {"bg_w": 0.05, "window": 60, "lead": 480}
     for bad in [(0.0, 60, 480), (0.05, 0, 480), (True, 60, 480),
-                (float("inf"), 60, 480), (0.05, 60.5, 480), (0.05, 60, 480.5)]:
+                (float("inf"), 60, 480), (0.05, 60.5, 480), (0.05, 60, 480.5),
+                (0.05, float("inf"), 480), (0.05, 60, float("nan"))]:
         with pytest.raises(ValueError):
             make_setting(*bad)
 
@@ -75,6 +76,10 @@ def test_case_row_schema_and_consistency_enforced():
         summarize_cases([dict(_row(), rmse_delta=float("nan"))])
     with pytest.raises(ValueError):                             # negative residual
         summarize_cases([dict(_row(), max_residual=-1.0)])
+    with pytest.raises(ValueError):                             # numeric case_id
+        summarize_cases([dict(_row(), case_id=123)])
+    with pytest.raises(ValueError):                             # empty regime
+        summarize_cases([dict(_row(), regime="  ")])
 
 
 def test_run_manifest_wires_validate_loop_and_gate():
