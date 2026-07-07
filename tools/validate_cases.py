@@ -11,7 +11,7 @@ model is promotable — only whether the EVIDENCE BASE is large enough to ask th
 
 Pure validate_manifest(dict) has no yaml dependency (tests pass dicts directly).
 """
-from collections import defaultdict
+from collections import Counter, defaultdict
 import sys
 from datetime import datetime
 from pathlib import Path
@@ -22,7 +22,9 @@ OPTIONAL = ("forcing_source", "obs_source", "notes")
 NONEMPTY_OPTIONAL = ("forcing_source", "obs_source")   # notes may be an empty string
 # two readiness tiers so the name can't be mistaken for "the model is promotable":
 MIN_CASES, MIN_REGIMES = 3, 2               # minimum_evidence_ready (matches promotion_gate)
-RECOMMENDED_CASES, RECOMMENDED_REGIMES = 9, 3   # recommended_promotion_ready (design target)
+# recommended = the doc's "3 regimes x 3 cases each" target, enforced literally (not just a
+# 9-total that a lopsided [7,1,1] could game) since the finding is regime-dependent:
+RECOMMENDED_REGIMES, RECOMMENDED_CASES_PER_REGIME = 3, 3
 
 
 def _parse_dt(s, field):
@@ -100,7 +102,8 @@ def validate_manifest(manifest):
         return {"ok": False, "errors": ["manifest must be a mapping with a 'cases' list"],
                 "n_cases": 0, "minimum_evidence_ready": False,
                 "recommended_promotion_ready": False, "readiness_reasons": ["no cases"]}
-    errors, ids, regimes, stations = [], set(), set(), set()
+    errors, ids, stations = [], set(), set()
+    regime_counts = Counter()
     by_station = defaultdict(list)
     for i, c in enumerate(manifest["cases"]):
         try:
@@ -111,11 +114,11 @@ def validate_manifest(manifest):
         cid = c["case_id"]
         if cid in ids:
             errors.append(f"[case {i}] duplicate case_id: {cid!r}")
-        ids.add(cid); regimes.add(c["regime"]); stations.add(c["station"])
+        ids.add(cid); regime_counts[c["regime"]] += 1; stations.add(c["station"])
         by_station[c["station"]].append((start, end, cid))
     errors += _overlap_errors(by_station)
 
-    n_cases, n_reg = len(ids), len(regimes)
+    n_cases, n_reg = len(ids), len(regime_counts)
     reasons = []
     if errors:
         reasons.append("has errors")
@@ -125,12 +128,16 @@ def validate_manifest(manifest):
         reasons.append(f"regimes {n_reg} < minimum {MIN_REGIMES}")
     min_ready = not reasons
     rec_reasons = list(reasons)
-    if n_cases < RECOMMENDED_CASES:
-        rec_reasons.append(f"cases {n_cases} < recommended {RECOMMENDED_CASES}")
     if n_reg < RECOMMENDED_REGIMES:
         rec_reasons.append(f"regimes {n_reg} < recommended {RECOMMENDED_REGIMES}")
-    return {"ok": not errors, "errors": errors, "n_cases": n_cases,
-            "n_stations": len(stations), "n_regimes": n_reg, "regimes": sorted(regimes),
+    thin = {r: n for r, n in regime_counts.items() if n < RECOMMENDED_CASES_PER_REGIME}
+    if thin:                                   # every covered regime needs >=3 cases (not just 9 total)
+        rec_reasons.append(f"recommended needs >= {RECOMMENDED_CASES_PER_REGIME} cases per regime; "
+                           f"under-covered: {dict(sorted(thin.items()))}")
+    return {"ok": not errors, "errors": errors,
+            "n_rows": len(manifest["cases"]), "n_cases": n_cases,
+            "n_stations": len(stations), "n_regimes": n_reg,
+            "regimes": sorted(regime_counts), "regime_counts": dict(sorted(regime_counts.items())),
             "minimum_evidence_ready": min_ready,
             "recommended_promotion_ready": not rec_reasons,
             "readiness_reasons": rec_reasons if rec_reasons else ["meets recommended target"]}

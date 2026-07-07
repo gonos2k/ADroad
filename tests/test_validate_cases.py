@@ -56,8 +56,32 @@ def test_two_tier_readiness():
     ]
     rep = validate_manifest({"cases": cases})
     assert rep["ok"] and rep["minimum_evidence_ready"] is True
-    assert rep["recommended_promotion_ready"] is False             # only 3 < 9 cases
-    assert any("recommended" in r for r in rep["readiness_reasons"])
+    assert rep["recommended_promotion_ready"] is False             # 1 case/regime < 3
+    assert any("per regime" in r for r in rep["readiness_reasons"])
+
+
+def _cases_per_regime(counts):
+    out, d = [], 1
+    for regime, n in counts.items():
+        for _ in range(n):
+            out.append(_case(cid=f"{regime}_{d}", station=f"st{d}",
+                             start=f"2026-03-{d:02d}T00:00:00", end=f"2026-03-{d:02d}T06:00:00",
+                             regime=regime))
+            d += 1
+    return out
+
+
+def test_recommended_requires_three_cases_per_regime():
+    # balanced 3x3 -> recommended True
+    ok = validate_manifest({"cases": _cases_per_regime(
+        {"dry_cold": 3, "warm_wet": 3, "freeze_transition": 3})})
+    assert ok["ok"] and ok["recommended_promotion_ready"] is True
+    # lopsided 7/1/1 (9 total, 3 regimes) must FAIL recommended (per-regime, not bare 9)
+    lop = validate_manifest({"cases": _cases_per_regime(
+        {"dry_cold": 7, "warm_wet": 1, "freeze_transition": 1})})
+    assert lop["ok"] and lop["minimum_evidence_ready"] is True
+    assert lop["recommended_promotion_ready"] is False
+    assert any("per regime" in r for r in lop["readiness_reasons"])
 
 
 def test_minimum_not_met_when_too_few_or_single_regime():

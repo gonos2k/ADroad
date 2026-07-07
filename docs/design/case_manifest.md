@@ -3,11 +3,17 @@
 ## Why this exists
 
 `promotion_gate` (design §11, `droad/skill_gate.py`) intentionally distinguishes a **case**
-(an independent station/day) from a **window** (a slice of one fixture). Every result so far
-— dry multi-window, full-model A0 multi-window, the A0 grid — comes from a **single fixture**,
-so `promotion_gate` is called with `n_cases=1` and the verdict is `REPORT_ONLY` no matter how
-many windows pass. This is deliberate: a model that assimilates well on four windows of *one*
-day/station has not demonstrated it generalizes.
+(one station over one non-overlapping time interval) from a **window** (a slice of one
+fixture). Every result so far — dry multi-window, full-model A0 multi-window, the A0 grid —
+comes from a **single fixture**, so `promotion_gate` is called with `n_cases=1` and the verdict
+is `REPORT_ONLY` no matter how many windows pass. This is deliberate: a model that assimilates
+well on four windows of *one* interval has not demonstrated it generalizes.
+
+Independence is enforced by **interval overlap per station**, not by calendar date: two cases
+at the same station whose `[start, end)` intervals overlap are not independent (even if their
+start dates differ), while two non-overlapping intervals at the same station on the same day
+are allowed. Station-days may be summarized separately for reporting, but the *contract* is
+non-overlapping station intervals.
 
 The only way to raise `n_cases` honestly is to assemble a manifest of genuinely distinct
 cases. This document defines that manifest and its validation contract. Building it does not
@@ -40,22 +46,21 @@ checks each case's schema/semantics and reports two readiness tiers, both descri
 - `minimum_evidence_ready`: no errors, `n_cases ≥ 3` (matches `promotion_gate(min_cases=3)`),
   `≥ 2` regimes, and no overlapping cases at the same station. Enough to *run* a first
   promotion attempt.
-- `recommended_promotion_ready`: no errors, `n_cases ≥ 9`, `≥ 3` regimes, no overlaps. The
-  defensible target below.
+- `recommended_promotion_ready`: no errors, `≥ 3` regimes, **`≥ 3` cases in every covered
+  regime** (so a lopsided `[7, 1, 1]` does not pass), no overlaps. This literally enforces the
+  "3 regimes × 3 cases each" target below rather than a bare 9-total.
 
-Independence is checked by **interval overlap per station**, not by start-date: two cases on
-the same station whose `[start, end)` intervals overlap are not independent, even if their
-start dates differ. Datetimes must include a time (no date-only) and start/end must share
-timezone-awareness so comparisons are well-defined.
+Datetimes must include a time (no date-only) and start/end must share timezone-awareness so
+comparisons are well-defined.
 
 Both flags mean only that the evidence base is large/diverse enough to *attempt* promotion —
 never that a model passed. Skill/physics still have to beat baseline in every case at run time.
 
 ## Recommended target
 
-A defensible first promotion attempt: **≥ 3 regimes × ≥ 3 station-days = ≥ 9 independent
-cases** (`recommended_promotion_ready`). Fewer still allows a run once
-`minimum_evidence_ready` holds, but the result stays weak and every case is `REPORT_ONLY`
+A defensible first promotion attempt: **≥ 3 regimes with ≥ 3 non-overlapping cases each
+(≥ 9 total)**, which is what `recommended_promotion_ready` enforces. Fewer still allows a run
+once `minimum_evidence_ready` holds, but the result stays weak and every case is `REPORT_ONLY`
 until it beats baseline.
 
 ## What NOT to do
@@ -63,8 +68,8 @@ until it beats baseline.
 - Do not count windows from one fixture as cases (that is the `n_cases=1` situation the whole
   design guards against).
 - Do not fabricate cases to reach the threshold; each must map to real forcing + obs.
-- Do not read `promotion_ready` as "the model is promotable" — it is purely about evidence
-  volume/diversity.
+- Do not read either readiness flag (`minimum_evidence_ready`, `recommended_promotion_ready`)
+  as "the model is promotable" — they are purely about evidence volume/diversity.
 
 ## Next increments (not in this skeleton)
 
