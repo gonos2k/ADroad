@@ -1,0 +1,50 @@
+# dROAD independent-case manifest — EXAMPLE / SCHEMA ONLY (not real observations).
+#
+# Purpose (design §11, docs/design/case_manifest.md): promotion_gate treats a *case* as an
+# independent station/day, NOT a window. Multi-window results from ONE fixture stay
+# REPORT_ONLY no matter how good. Only a manifest of distinct cases raises n_cases toward a
+# PROMOTE candidate. This file is the schema example; replace with real cases before use.
+#
+# Each case = one station over one continuous period, tagged with a weather regime so
+# coverage across regimes can be checked (a promotion built only on dry_cold days is weak).
+#
+# regimes: dry_cold | warm_wet | freeze_transition | precip_snow | melt_refreeze
+# required fields: case_id, station, start, end, regime
+# optional fields: forcing_source, obs_source, notes
+
+cases:
+  - case_id: stationA_2026-01-12_freeze_transition
+    station: stationA
+    start: "2026-01-12T00:00:00"
+    end: "2026-01-13T00:00:00"
+    regime: freeze_transition
+    forcing_source: observed
+    obs_source: road_surface_obs
+    notes: "near-zero crossing with light precipitation"
+
+  - case_id: stationA_2026-01-15_dry_cold
+    station: stationA
+    start: "2026-01-15T00:00:00"
+    end: "2026-01-16T00:00:00"
+    regime: dry_cold
+    forcing_source: observed
+    obs_source: road_surface_obs
+    notes: "clear, well below 0C, no precip"
+
+  - case_id: stationB_2026-02-03_precip_snow
+    station: stationB
+    start: "2026-02-03T00:00:00"
+    end: "2026-02-04T00:00:00"
+    regime: precip_snow
+    forcing_source: observed
+    obs_source: road_surface_obs
+    notes: "snowfall accumulating on surface"
+
+  - case_id: stationB_2026-02-20_melt_refreeze
+    station: stationB
+    start: "2026-02-20T00:00:00"
+    end: "2026-02-21T00:00:00"
+    regime: melt_refreeze
+    forcing_source: observed
+    obs_source: road_surface_obs
+    notes: "daytime melt then overnight refreeze"
