@@ -125,6 +125,16 @@ def test_run_manifest_rejects_bad_require_value():
                      run_one=lambda c, s: _row(), require="none")
 
 
+def test_cli_returns_error_code_not_traceback(tmp_path, capsys):
+    yaml = pytest.importorskip("yaml")
+    from tools.run_cases import main
+    p = tmp_path / "thin.yaml"
+    p.write_text(yaml.safe_dump({"cases": [_mcase("a", "sa", 1)]}))   # schema-clean but <3 cases
+    # invalid/thin manifest -> ValueError is caught, printed, exit 1 (no traceback)
+    assert main([str(p), "--bg-w", "0.05", "--window", "60", "--lead", "480"]) == 1
+    assert "ERROR" in capsys.readouterr().err
+
+
 def test_default_run_one_is_not_implemented():
     with pytest.raises(NotImplementedError):
         _run_one_not_implemented({"case_id": "a"}, make_setting(0.05, 60, 480))

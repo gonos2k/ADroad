@@ -153,6 +153,9 @@ def main(argv=None):
     except NotImplementedError as e:            # per-case loader not wired yet (skeleton)
         print(f"ERROR {e}", file=sys.stderr)
         return 2
+    except ValueError as e:                      # invalid manifest / thin tier / bad row
+        print(f"ERROR {e}", file=sys.stderr)
+        return 1
     verdict, reasons = summary["promotion"]
     print(f"n_cases={summary['n_cases']} all_beat={summary['all_beat']} "
           f"physics_worse_rate={summary['physics_worse_rate']:.2f} "
