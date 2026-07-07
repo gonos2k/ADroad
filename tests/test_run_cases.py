@@ -135,6 +135,18 @@ def test_cli_returns_error_code_not_traceback(tmp_path, capsys):
     assert "ERROR" in capsys.readouterr().err
 
 
+def test_cli_bad_setting_returns_error_code_not_traceback(tmp_path, capsys):
+    yaml = pytest.importorskip("yaml")
+    from tools.run_cases import main
+    p = tmp_path / "cases.yaml"
+    p.write_text(yaml.safe_dump({"cases": [_mcase("a", "sa", 1),
+                                           _mcase("b", "sb", 2, "warm_wet"),
+                                           _mcase("c", "sc", 3, "precip_snow")]}))
+    # bad setting (bg_w=0) must be caught in main() -> ERROR + exit 1, not a traceback
+    assert main([str(p), "--bg-w", "0", "--window", "60", "--lead", "480"]) == 1
+    assert "ERROR" in capsys.readouterr().err
+
+
 def test_default_run_one_is_not_implemented():
     with pytest.raises(NotImplementedError):
         _run_one_not_implemented({"case_id": "a"}, make_setting(0.05, 60, 480))

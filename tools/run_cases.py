@@ -145,15 +145,15 @@ def main(argv=None):
     ap.add_argument("--lead", type=int, required=True)
     ap.add_argument("--require", choices=("minimum", "recommended"), default="minimum")
     args = ap.parse_args(argv)
-    import yaml
-    manifest = yaml.safe_load(Path(args.manifest).read_text())
-    setting = make_setting(args.bg_w, args.window, args.lead)
-    try:
+    try:                                         # bad setting / unreadable manifest / thin tier
+        import yaml
+        manifest = yaml.safe_load(Path(args.manifest).read_text())
+        setting = make_setting(args.bg_w, args.window, args.lead)
         summary, _ = run_manifest(manifest, setting, require=args.require)
     except NotImplementedError as e:            # per-case loader not wired yet (skeleton)
         print(f"ERROR {e}", file=sys.stderr)
         return 2
-    except ValueError as e:                      # invalid manifest / thin tier / bad row
+    except ValueError as e:                      # invalid manifest / thin tier / bad row / setting
         print(f"ERROR {e}", file=sys.stderr)
         return 1
     verdict, reasons = summary["promotion"]
