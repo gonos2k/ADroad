@@ -202,6 +202,8 @@ def test_case_row_from_a0_rejects_corrupt_a0():
         case_row_from_a0(case, dict(_a0(), gate_da_vs_bg=("False", [])))
     with pytest.raises(ValueError):                             # non-finite dx
         case_row_from_a0(case, _a0(dx_max=float("nan")))
+    with pytest.raises(ValueError):                             # negative dx norm (corrupt A0)
+        case_row_from_a0(case, _a0(dx_l2=-1.0))
     with pytest.raises(ValueError):                             # malformed shape -> wrapped
         case_row_from_a0(case, {"physics_worse": False})
 

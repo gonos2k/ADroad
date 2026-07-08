@@ -104,6 +104,8 @@ def case_row_from_a0(case, a0):
         raise ValueError(f"malformed A0 result for case {case.get('case_id')!r}: {e}") from e
     if bg_res < 0.0 or da_res < 0.0:
         raise ValueError(f"case {case['case_id']!r} A0 residuals must be non-negative")
+    if dx_l2 < 0.0 or dx_max_abs < 0.0:         # norms are magnitudes; negatives = corrupt A0
+        raise ValueError(f"case {case['case_id']!r} A0 dx norms must be non-negative")
     row = {"case_id": case["case_id"], "regime": case["regime"],
            "gate_pass": gate_pass, "physics_worse": physics_worse,
            "state_large": bool(dx_max_abs > 2.0 or dx_l2 > 3.0),
