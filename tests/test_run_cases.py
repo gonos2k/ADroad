@@ -220,6 +220,40 @@ def test_case_row_from_a0_smoke_on_real_build_a0():
     assert s["n_cases"] == 1 and s["promotion"][0] == "REPORT_ONLY"
 
 
+def test_fixture_run_one_maps_case_to_k0(monkeypatch):
+    import tools.report_forecast_da_fullmodel as m
+    from tools.run_cases import fixture_run_one
+    seen = {}
+
+    def fake_build_a0(k0, window, lead, bg_w):
+        seen.update(k0=k0, window=window, lead=lead, bg_w=bg_w)
+        return _a0()
+
+    monkeypatch.setattr(m, "build_a0", fake_build_a0)
+    ro = fixture_run_one({"c1": 2100})
+    row = ro({"case_id": "c1", "regime": "dry_cold"}, make_setting(0.05, 30, 60))
+    assert seen == {"k0": 2100, "window": 30, "lead": 60, "bg_w": 0.05}
+    assert row["case_id"] == "c1" and row["regime"] == "dry_cold"
+    with pytest.raises(ValueError):                             # case not in the k0 map
+        ro({"case_id": "unmapped", "regime": "dry_cold"}, make_setting(0.05, 30, 60))
+    with pytest.raises(ValueError):
+        fixture_run_one(["not", "a", "dict"])
+
+
+@pytest.mark.jax
+def test_pipeline_end_to_end_on_fixture():
+    # WIRING smoke: validate -> run_manifest -> case_row_from_a0 -> summarize_cases ->
+    # promotion_gate runs end-to-end on the fixture with n_cases=3 (not real evidence).
+    from tools.run_cases import fixture_run_one, run_manifest
+    cases = [_mcase("a", "sa", 1), _mcase("b", "sb", 2, "warm_wet"),
+             _mcase("c", "sc", 3, "precip_snow")]
+    ro = fixture_run_one({"a": 2000, "b": 2100, "c": 2200})
+    summary, rows = run_manifest({"cases": cases}, make_setting(0.05, 30, 60), run_one=ro)
+    assert len(rows) == 3 and summary["n_cases"] == 3
+    assert summary["promotion"][0] in ("PROMOTE", "REPORT_ONLY")   # pipeline reached a verdict
+    assert summary["residual_clean"] is True                       # full-model audit clean
+
+
 def test_default_run_one_is_not_implemented():
     with pytest.raises(NotImplementedError):
         _run_one_not_implemented({"case_id": "a"}, make_setting(0.05, 60, 480))

@@ -177,6 +177,30 @@ def run_manifest(manifest, setting, run_one=_run_one_not_implemented, require="m
     return summarize_cases(rows), rows
 
 
+def fixture_run_one(k0_by_case):
+    """Build a run_one(case, setting) backed by the SINGLE existing fixture: each case is
+    mapped to a k0 window via k0_by_case[case_id], and A0 is run on that window.
+
+    WIRING / INTEGRATION ONLY — NOT scientific promotion evidence. Every case shares one
+    fixture, so the cases are not truly independent even though the manifest metadata is
+    distinct; a PROMOTE reached this way only demonstrates the pipeline path, it does not
+    promote the model. Real evidence needs per-case forcing/obs (see docs/design/case_manifest).
+    Use this to exercise validate -> run -> aggregate -> gate end-to-end before real data."""
+    if not isinstance(k0_by_case, dict):
+        raise ValueError("k0_by_case must be a mapping case_id -> k0")
+
+    def _run_one(case, setting):
+        cid = case["case_id"]
+        if cid not in k0_by_case:
+            raise ValueError(f"no fixture k0 mapped for case {cid!r}")
+        from tools.report_forecast_da_fullmodel import build_a0   # jax, lazy
+        a0 = build_a0(k0=int(k0_by_case[cid]), window=setting["window"],
+                      lead=setting["lead"], bg_w=setting["bg_w"])
+        return case_row_from_a0(case, a0)
+
+    return _run_one
+
+
 def main(argv=None):
     import argparse
     ap = argparse.ArgumentParser(description="Run a fixed A0 setting over a case manifest")
