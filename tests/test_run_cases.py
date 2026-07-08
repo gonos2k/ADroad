@@ -192,6 +192,20 @@ def test_case_row_from_a0_flags_state_large_and_stays_consistent():
         case_row_from_a0({"case_id": "x"}, _a0())
 
 
+def test_case_row_from_a0_rejects_corrupt_a0():
+    case = {"case_id": "x", "regime": "dry_cold"}
+    with pytest.raises(ValueError):                             # NaN da residual not hidden by max()
+        case_row_from_a0(case, _a0(resid_da=float("nan")))
+    with pytest.raises(ValueError):                             # negative residual
+        case_row_from_a0(case, _a0(resid_bg=-1.0))
+    with pytest.raises(ValueError):                             # non-bool gate flag ('False' truthy)
+        case_row_from_a0(case, dict(_a0(), gate_da_vs_bg=("False", [])))
+    with pytest.raises(ValueError):                             # non-finite dx
+        case_row_from_a0(case, _a0(dx_max=float("nan")))
+    with pytest.raises(ValueError):                             # malformed shape -> wrapped
+        case_row_from_a0(case, {"physics_worse": False})
+
+
 @pytest.mark.jax
 def test_case_row_from_a0_smoke_on_real_build_a0():
     # end-to-end: real A0 output -> case row -> aggregator, proving the extraction contract

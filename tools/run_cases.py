@@ -20,6 +20,8 @@ import math
 import sys
 from pathlib import Path
 
+import numpy as np
+
 REPO = Path(__file__).resolve().parent.parent
 sys.path.insert(0, str(REPO))
 from droad.skill_gate import promotion_gate  # noqa: E402
@@ -36,6 +38,14 @@ def _finite(name, x):
     if isinstance(x, bool) or not isinstance(x, (int, float)) or not math.isfinite(x):
         raise ValueError(f"{name} must be a finite number")
     return float(x)
+
+
+def _strict_bool(name, x):
+    """Accept a genuine boolean (Python bool or numpy bool_) and return a Python bool; reject
+    strings/ints so a corrupt A0 flag like 'False' can't sneak through as truthy."""
+    if isinstance(x, (bool, np.bool_)):
+        return bool(x)
+    raise ValueError(f"{name} must be bool")
 
 
 def make_setting(bg_w, window, lead):
@@ -81,14 +91,23 @@ def case_row_from_a0(case, a0):
     for k in ("case_id", "regime"):
         if k not in case:
             raise ValueError(f"case missing {k!r}")
-    dev_bg, dev_da = a0["bg"][1], a0["da"][1]
+    try:
+        gate_pass = _strict_bool("a0.gate_da_vs_bg[0]", a0["gate_da_vs_bg"][0])
+        physics_worse = _strict_bool("a0.physics_worse", a0["physics_worse"])
+        dx_l2 = _finite("a0.dx_l2", a0["dx_l2"])
+        dx_max_abs = _finite("a0.dx_max_abs", a0["dx_max_abs"])
+        rmse_delta = _finite("a0.rmse_delta_da_minus_bg", a0["rmse_delta_da_minus_bg"])
+        # each residual validated separately — max(0.0, nan) can return 0.0 and hide a NaN.
+        bg_res = _finite("a0.bg residual", a0["bg"][1]["max_primary_residual"])
+        da_res = _finite("a0.da residual", a0["da"][1]["max_primary_residual"])
+    except (KeyError, TypeError, IndexError) as e:
+        raise ValueError(f"malformed A0 result for case {case.get('case_id')!r}: {e}") from e
+    if bg_res < 0.0 or da_res < 0.0:
+        raise ValueError(f"case {case['case_id']!r} A0 residuals must be non-negative")
     row = {"case_id": case["case_id"], "regime": case["regime"],
-           "gate_pass": bool(a0["gate_da_vs_bg"][0]),
-           "physics_worse": bool(a0["physics_worse"]),
-           "state_large": bool(a0["dx_max_abs"] > 2.0 or a0["dx_l2"] > 3.0),
-           "rmse_delta": float(a0["rmse_delta_da_minus_bg"]),
-           "max_residual": max(float(dev_bg["max_primary_residual"]),
-                               float(dev_da["max_primary_residual"]))}
+           "gate_pass": gate_pass, "physics_worse": physics_worse,
+           "state_large": bool(dx_max_abs > 2.0 or dx_l2 > 3.0),
+           "rmse_delta": rmse_delta, "max_residual": max(bg_res, da_res)}
     return _validate_case_row(row)
 
 
