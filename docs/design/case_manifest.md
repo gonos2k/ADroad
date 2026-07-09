@@ -86,4 +86,11 @@ Still pending (needs data we don't have yet):
    because only one fixture exists. The aggregate→gate contract is locked and tested; the
    loader is the remaining wiring once multiple real cases exist.
 2. Pick the A0 setting from the grid stability region (Step 3 result) before running cases, so
-   the case study isn't confounded by an untuned `bg_w/window/lead`.
+   the case study isn't confounded by an untuned `bg_w/window/lead`. **Done**: the A0 grid
+   (`reports/forecast_da_fullmodel_grid.*`, 12 combos) found no combo exceeds `gate_pass_rate`
+   0.50 (A0 stays regime-dependent, REPORT_ONLY everywhere), and the safest combo is
+   **`bg_w=0.2, window=60, lead=240`** — top `gate_pass_rate` tier with `physics_worse_rate=0`,
+   the smallest `worst_delta_rmse` (+0.019), and no `state_large`. Use this as the fixed A0
+   setting for `run_cases`. Note the ceiling: at 0.50 gate-pass a real promotion is still
+   unlikely (beats baseline in only 2/4 windows), so independent cases are expected to remain
+   regime-dependent — the value of `run_cases` is an honest verdict, not a guaranteed PROMOTE.
